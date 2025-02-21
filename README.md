@@ -3,6 +3,8 @@
 A React-based visualization tool for exploring and analyzing transaction paths in the Circles network. This application provides an interactive interface to visualize token transfer paths between addresses and analyze maximum flow capacity.
 
 
+<img src="img/viz1.png" alt="pyfinder" style="height:200px;width:350px;"> <img src="img/viz2.png" alt="pyfinder" style="height:200px;width:350px;"> <img src="img/viz3.png" alt="pyfinder" style="height:200px;width:350px;">
+
 ## Uses
 
 - React 18.2

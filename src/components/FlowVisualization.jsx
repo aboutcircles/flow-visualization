@@ -43,9 +43,9 @@ const FlowVisualization = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [formData, setFormData] = useState({
     from: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    to: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
+    to: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
     fromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    toTokens: '',  // Optional field
+    toTokens: '',  
     amount: '100000000000000000000000000'
   });
   const [formErrors, setFormErrors] = useState({});
@@ -213,36 +213,34 @@ const FlowVisualization = () => {
           edges: elements.edges
         },
         style: [
-            {
-                selector: 'node',
-                style: {
-                'background-color': 'data(color)',
-                'label': 'data(fullAddress)', 
-                'text-valign': 'center',
-                'text-halign': 'center',
-                'font-size': '8px',
-                'width': '40px',
-                'height': '40px',
-                'text-wrap': 'wrap',
-                'text-max-width': '120px'
-                }
-            },
-            {
-                selector: 'edge',
-                style: {
-                'width': 'data(weight)',
-                'line-color': '#94A3B8',
-                'target-arrow-color': '#94A3B8',
-                'target-arrow-shape': 'triangle',
-                'curve-style': 'bezier',
-                'label': function(ele) {
-                    return ele.data('percentage') + '%';
-                },
-                'text-rotation': 'autorotate',
-                'font-size': '8px',
-                'text-margin-y': '-10px'
-                }
+          {
+            selector: 'node',
+            style: {
+              'background-color': 'data(color)',
+              'label': 'data(label)', // Keep using the shortened label: `${id.slice(0, 6)}...${id.slice(-4)}`
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'font-size': '10px',
+              'width': '40px',
+              'height': '40px'
             }
+          },
+          {
+            selector: 'edge',
+            style: {
+              'width': 'data(weight)',
+              'line-color': '#94A3B8',
+              'target-arrow-color': '#94A3B8',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'bezier',
+              'label': function(ele) {
+                return ele.data('percentage') + '%';
+              },
+              'text-rotation': 'autorotate',
+              'font-size': '8px',
+              'text-margin-y': '-10px'
+            }
+          }
         ],
         layout: {
           name: 'dagre',
