@@ -1,4 +1,3 @@
-// FlowVisualization.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
@@ -14,6 +13,48 @@ cytoscape.use(dagre);
 
 // Define the API endpoint as a constant for easy updating
 const API_ENDPOINT = '/api';
+
+// Function to fetch wrapped tokens
+const fetchWrappedTokens = async () => {
+  try {
+    const response = await fetch('https://rpc.aboutcircles.com/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'circles_query',
+        params: [{
+          Namespace: 'V_Crc',
+          Table: 'Tokens',
+          Limit: 100000,
+          Columns: ['token'],
+          Filter: [{
+            Type: 'FilterPredicate',
+            FilterType: 'Equals',
+            Column: 'version',
+            Value: 2
+          }, {
+            Type: 'FilterPredicate',
+            FilterType: 'Like',
+            Column: 'type',
+            Value: '%ERC20WrapperDeployed%'
+          }],
+          Order: []
+        }]
+      })
+    });
+
+    const data = await response.json();
+    return data.result.rows.map(row => row[0].toLowerCase());
+  } catch (error) {
+    console.error('Error fetching wrapped tokens:', error);
+    return [];
+  }
+};
+
 
 // Tooltip component with improved formatting
 const Tooltip = ({ text, position }) => {
@@ -45,8 +86,9 @@ const FlowVisualization = () => {
     from: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
     to: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
     fromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    toTokens: '',  
-    amount: '100000000000000000000000000'
+    toTokens: '',
+    crcAmount: '1000',  // Amount in ETH
+    amount: '1000000000000000000000' // Amount in Wei (will be calculated from crcAmount)
   });
   const [formErrors, setFormErrors] = useState({});
   const [pathData, setPathData] = useState(null);
@@ -54,18 +96,56 @@ const FlowVisualization = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [tooltip, setTooltip] = useState({ text: '', position: null });
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
+  const [wrappedTokens, setWrappedTokens] = useState([]);
   
   // References for Cytoscape
   const cyRef = useRef(null);
   const containerRef = useRef(null);
 
+  // Fetch wrapped tokens on component mount
+  useEffect(() => {
+    const loadWrappedTokens = async () => {
+      const tokens = await fetchWrappedTokens();
+      setWrappedTokens(tokens);
+    };
+    loadWrappedTokens();
+  }, []);
+
+  // Convert ETH to Wei
+  const ethToWei = (crcAmount) => {
+    try {
+      if (!crcAmount || isNaN(crcAmount)) return '0';
+      
+      // Convert to Wei (multiply by 10^18)
+      const [whole, fraction = ''] = crcAmount.toString().split('.');
+      const decimals = fraction.padEnd(18, '0');
+      const wei = whole + decimals;
+      return BigInt(wei).toString();
+    } catch (error) {
+      console.error('Error converting ETH to Wei:', error);
+      return '0';
+    }
+  };
+
   // Handle form input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    
+    if (name === 'amount') {
+      // For amount field, store ETH value and calculate Wei
+      const weiValue = ethToWei(value);
+      setFormData(prev => ({
+        ...prev,
+        crcAmount: value,
+        amount: weiValue
+      }));
+    } else {
+      // For other fields, store value as is
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
     
     if (formErrors[name]) {
       setFormErrors(prev => ({
@@ -83,7 +163,7 @@ const FlowVisualization = () => {
     try {
       // Filter out empty values from the query parameters
       const queryParams = new URLSearchParams(
-        Object.entries(formData).filter(([_, value]) => value !== '')
+        Object.entries(formData).filter(([key, value]) => value !== '' && key !== 'crcAmount')
       );
       
       const url = `${API_ENDPOINT}/findPath?${queryParams}`;
@@ -161,6 +241,7 @@ const FlowVisualization = () => {
 
         const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
         const flowValue = Number(transfer.value) / 1e18;
+        const isWrappedToken = wrappedTokens.includes(transfer.tokenOwner.toLowerCase());
 
         elements.edges.push({
           data: {
@@ -171,7 +252,8 @@ const FlowVisualization = () => {
             flowValue: flowValue,
             percentage: flowPercentage.toFixed(2),
             tokenOwner: transfer.tokenOwner,
-            fullInfo: `Flow: ${flowValue.toFixed(6)} tokens\nPercentage: ${flowPercentage.toFixed(2)}%\nToken Owner: ${transfer.tokenOwner}`
+            isWrapped: isWrappedToken,
+            fullInfo: `Flow: ${flowValue.toFixed(6)} tokens\nPercentage: ${flowPercentage.toFixed(2)}%\nToken (${isWrappedToken ? 'CRC20' : 'ERC1155'}): ${transfer.tokenOwner}`
           }
         });
       });
@@ -217,7 +299,7 @@ const FlowVisualization = () => {
             selector: 'node',
             style: {
               'background-color': 'data(color)',
-              'label': 'data(label)', // Keep using the shortened label: `${id.slice(0, 6)}...${id.slice(-4)}`
+              'label': 'data(label)',
               'text-valign': 'center',
               'text-halign': 'center',
               'font-size': '10px',
@@ -233,6 +315,9 @@ const FlowVisualization = () => {
               'target-arrow-color': '#94A3B8',
               'target-arrow-shape': 'triangle',
               'curve-style': 'bezier',
+              'line-style': function(ele) {
+                return ele.data('isWrapped') ? 'dashed' : 'solid';
+              },
               'label': function(ele) {
                 return ele.data('percentage') + '%';
               },
@@ -285,7 +370,7 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
     };
-  }, [pathData, formData.from, formData.to]);
+  }, [pathData, formData.from, formData.to, wrappedTokens]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -336,6 +421,17 @@ const FlowVisualization = () => {
                       />
                     </div>
                     <div>
+                      <label className="block text-sm font-medium mb-1">Value (in CRC)</label>
+                      <Input
+                        name="amount"
+                        value={formData.crcAmount}
+                        onChange={handleInputChange}
+                        placeholder="Enter amount in ETH..."
+                        type="text"
+                        inputMode="decimal"
+                      />
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium mb-1">From Token (Optional)</label>
                       <Input
                         name="fromTokens"
@@ -383,7 +479,7 @@ const FlowVisualization = () => {
             )}
           </div>
 
-          {/* Main content area */}
+          {/* Main content area - remains the same */}
           <div className={`
             flex-1 bg-white relative
             transition-all duration-300 ease-in-out
@@ -410,10 +506,10 @@ const FlowVisualization = () => {
         <div className="p-4 bg-gray-50">
             <h2 className="text-lg font-semibold mb-4">Transactions</h2>
             <TransactionTable 
-            transfers={pathData.transfers} 
-            maxFlow={pathData.maxFlow}
-            onTransactionSelect={handleTransactionSelect}
-            selectedTransactionId={selectedTransactionId}
+              transfers={pathData.transfers} 
+              maxFlow={pathData.maxFlow}
+              onTransactionSelect={handleTransactionSelect}
+              selectedTransactionId={selectedTransactionId}
             />
         </div>
         )}
