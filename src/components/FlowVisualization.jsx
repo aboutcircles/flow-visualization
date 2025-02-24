@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/ui/header';
 import TransactionTable from '@/components/ui/transaction_table';
+import ToggleSwitch from '@/components/ui/toggle-switch';
 
 // Register the dagre layout with Cytoscape
 cytoscape.use(dagre);
@@ -97,6 +98,7 @@ const FlowVisualization = () => {
   const [tooltip, setTooltip] = useState({ text: '', position: null });
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [wrappedTokens, setWrappedTokens] = useState([]);
+  const [showWrappedTokens, setShowWrappedTokens] = useState(true);
   
   // References for Cytoscape
   const cyRef = useRef(null);
@@ -315,6 +317,9 @@ const FlowVisualization = () => {
               'target-arrow-color': '#94A3B8',
               'target-arrow-shape': 'triangle',
               'curve-style': 'bezier',
+              'visibility': function(ele) {
+                return (!showWrappedTokens && ele.data('isWrapped')) ? 'hidden' : 'visible';
+              },
               'line-style': function(ele) {
                 return ele.data('isWrapped') ? 'dashed' : 'solid';
               },
@@ -370,7 +375,7 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
     };
-  }, [pathData, formData.from, formData.to, wrappedTokens]);
+  }, [pathData, formData.from, formData.to, wrappedTokens, showWrappedTokens]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -460,12 +465,24 @@ const FlowVisualization = () => {
                 </Card>
 
                 {pathData && (
+                <>
                   <Card>
                     <CardContent className="pt-4">
                       <p className="text-sm font-medium">Max Flow</p>
                       <p className="text-lg">{(Number(pathData.maxFlow) / 1e18).toFixed(6)}</p>
                     </CardContent>
                   </Card>
+
+                  <Card>
+                  <CardContent className="pt-4">
+                    <ToggleSwitch
+                      isEnabled={showWrappedTokens}
+                      onToggle={() => setShowWrappedTokens(!showWrappedTokens)}
+                      label="Show Wrapped Tokens"
+                    />
+                  </CardContent>
+                  </Card>
+                </>
                 )}
 
                 {error && (

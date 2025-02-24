@@ -26,7 +26,6 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/api/, ""),
       },
     },
-    // If needed:
-     allowedHosts: ["www.emptyblocks.xyz", 'emptyblocks.xyz', 'localhost'],
+    
   },
 })
