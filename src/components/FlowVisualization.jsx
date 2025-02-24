@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import cytoscape from 'cytoscape';
-import dagre from 'cytoscape-dagre';
+//import dagre from 'cytoscape-dagre';
+import klay from 'cytoscape-klay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -9,8 +10,8 @@ import Header from '@/components/ui/header';
 import TransactionTable from '@/components/ui/transaction_table';
 import ToggleSwitch from '@/components/ui/toggle-switch';
 
-// Register the dagre layout with Cytoscape
-cytoscape.use(dagre);
+// Register the klay layout with Cytoscape
+cytoscape.use(klay);
 
 // Define the API endpoint as a constant for easy updating
 const API_ENDPOINT = '/api';
@@ -333,7 +334,7 @@ const FlowVisualization = () => {
           }
         ],
         layout: {
-          name: 'dagre',
+          name: 'klay',
           rankDir: 'LR',
           padding: 50,
           spacingFactor: 1.5
