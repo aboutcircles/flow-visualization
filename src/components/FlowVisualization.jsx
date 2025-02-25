@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import cytoscape from 'cytoscape';
-//import dagre from 'cytoscape-dagre';
 import klay from 'cytoscape-klay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,12 +13,12 @@ import ToggleSwitch from '@/components/ui/toggle-switch';
 cytoscape.use(klay);
 
 // Define the API endpoint as a constant for easy updating
-const API_ENDPOINT = '/api';
+const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
 
 // Function to fetch wrapped tokens
 const fetchWrappedTokens = async () => {
   try {
-    const response = await fetch('https://rpc.aboutcircles.com/', {
+    const response = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -57,7 +56,6 @@ const fetchWrappedTokens = async () => {
   }
 };
 
-
 // Tooltip component with improved formatting
 const Tooltip = ({ text, position }) => {
   if (!position) return null;
@@ -85,13 +83,13 @@ const FlowVisualization = () => {
   // State management for the component
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [formData, setFormData] = useState({
-    from: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    to: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
-    fromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    toTokens: '',
-    crcAmount: '1000',  // Amount in ETH
-    amount: '1000000000000000000000', // Amount in Wei (will be calculated from crcAmount)
-    withWrap: true // New flag for API endpoint
+    From: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
+    To: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
+    FromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
+    ToTokens: '',
+    crcAmount: '1000',  // Amount in ETH (for UI display)
+    Amount: '1000000000000000000000', // Amount in Wei (will be calculated from crcAmount)
+    WithWrap: true // New flag for API endpoint
   });
   const [formErrors, setFormErrors] = useState({});
   const [pathData, setPathData] = useState(null);
@@ -134,19 +132,25 @@ const FlowVisualization = () => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     
-    if (name === 'amount') {
+    if (name === 'crcAmount') {
       // For amount field, store ETH value and calculate Wei
       const weiValue = ethToWei(value);
       setFormData(prev => ({
         ...prev,
         crcAmount: value,
-        amount: weiValue
+        Amount: weiValue
       }));
     } else {
+      // Map UI field names to the capitalized API parameter names
+      const mappedFieldName = name === 'from' ? 'From' :
+                              name === 'to' ? 'To' : 
+                              name === 'fromTokens' ? 'FromTokens' : 
+                              name === 'toTokens' ? 'ToTokens' : name;
+      
       // For other fields, store value as is
       setFormData(prev => ({
         ...prev,
-        [name]: value
+        [mappedFieldName]: value
       }));
     }
     
@@ -158,41 +162,72 @@ const FlowVisualization = () => {
     }
   };
 
-  // Handle toggle change for withWrap option
+  // Handle toggle change for WithWrap option
   const handleWithWrapToggle = () => {
     setFormData(prev => ({
       ...prev,
-      withWrap: !prev.withWrap
+      WithWrap: !prev.WithWrap
     }));
   };
 
-  // Function to fetch path data from API
+  // Function to fetch path data from API using JSON-RPC POST
   const fetchPathData = async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Filter out empty values from the query parameters
-      const queryParams = new URLSearchParams(
-        Object.entries(formData)
-          .filter(([key, value]) => 
-            // Include withWrap even if it's false
-            (value !== '' && key !== 'crcAmount') || key === 'withWrap'
-          )
-      );
-      
-      const url = `${API_ENDPOINT}/findPath?${queryParams}`;
-      console.log('Fetching from URL:', url);
+      // Create the params object for the JSON-RPC request
+      const params = {
+        Source: formData.From,
+        Sink: formData.To,
+        TargetFlow: formData.Amount,
+      };
 
-      const response = await fetch(url);
+      // Only add optional parameters if they have values
+      if (formData.FromTokens) {
+        params.FromTokens = formData.FromTokens;
+      }
+      
+      if (formData.ToTokens) {
+        params.ToTokens = formData.ToTokens;
+      }
+      
+      // WithWrap is a boolean, so always include it
+      params.WithWrap = formData.WithWrap;
+
+      // Construct the JSON-RPC request
+      const requestBody = {
+        jsonrpc: "2.0",
+        id: 0,
+        method: "circlesV2_findPath",
+        params: [params]
+      };
+
+      console.log('Sending JSON-RPC request:', requestBody);
+
+      const response = await fetch(API_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
       
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`API error: ${response.status} ${response.statusText}\n${errorText}`);
       }
       
-      const data = await response.json();
-      console.log('API Response:', data);
+      const responseData = await response.json();
+      
+      if (responseData.error) {
+        throw new Error(`JSON-RPC error: ${responseData.error.message || JSON.stringify(responseData.error)}`);
+      }
+      
+      console.log('API Response:', responseData);
+      
+      // Extract the result data
+      const data = responseData.result;
       setPathData(data);
     } catch (err) {
       console.error('Fetch error:', err);
@@ -274,8 +309,8 @@ const FlowVisualization = () => {
       });
 
       // Determine if source and sink are the same
-      const sourceAddress = formData.from.toLowerCase();
-      const sinkAddress = formData.to.toLowerCase();
+      const sourceAddress = formData.From.toLowerCase();
+      const sinkAddress = formData.To.toLowerCase();
       const isSameSourceSink = sourceAddress === sinkAddress;
 
       // Convert nodes set to array of node objects
@@ -385,7 +420,7 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
     };
-  }, [pathData, formData.from, formData.to, wrappedTokens]);
+  }, [pathData, formData.From, formData.To, wrappedTokens]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -421,7 +456,7 @@ const FlowVisualization = () => {
                       <label className="block text-sm font-medium mb-1">From Address</label>
                       <Input
                         name="from"
-                        value={formData.from}
+                        value={formData.From}
                         onChange={handleInputChange}
                         placeholder="0x..."
                       />
@@ -430,7 +465,7 @@ const FlowVisualization = () => {
                       <label className="block text-sm font-medium mb-1">To Address</label>
                       <Input
                         name="to"
-                        value={formData.to}
+                        value={formData.To}
                         onChange={handleInputChange}
                         placeholder="0x..."
                       />
@@ -438,7 +473,7 @@ const FlowVisualization = () => {
                     <div>
                       <label className="block text-sm font-medium mb-1">Value (in CRC)</label>
                       <Input
-                        name="amount"
+                        name="crcAmount"
                         value={formData.crcAmount}
                         onChange={handleInputChange}
                         placeholder="Enter amount in ETH..."
@@ -450,7 +485,7 @@ const FlowVisualization = () => {
                       <label className="block text-sm font-medium mb-1">From Token (Optional)</label>
                       <Input
                         name="fromTokens"
-                        value={formData.fromTokens}
+                        value={formData.FromTokens}
                         onChange={handleInputChange}
                         placeholder="0x..."
                       />
@@ -459,14 +494,14 @@ const FlowVisualization = () => {
                       <label className="block text-sm font-medium mb-1">To Token (Optional)</label>
                       <Input
                         name="toTokens"
-                        value={formData.toTokens}
+                        value={formData.ToTokens}
                         onChange={handleInputChange}
                         placeholder="0x..."
                       />
                     </div>
                     <div>
                       <ToggleSwitch
-                        isEnabled={formData.withWrap}
+                        isEnabled={formData.WithWrap}
                         onToggle={handleWithWrapToggle}
                         label="Include Wrapped Tokens"
                       />

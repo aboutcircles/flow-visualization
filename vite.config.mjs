@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 export default defineConfig({
-  base: '/pathfinder/',  // <-- IMPORTANT
+  base: '/pathfinder/',  
   plugins: [react()],
   resolve: {
     alias: {
@@ -19,13 +19,5 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     cors: true,
-    proxy: {
-      "/api": {
-        target: "http://192.168.2.124:8081",
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/api/, ""),
-      },
-    },
-    
   },
 })
