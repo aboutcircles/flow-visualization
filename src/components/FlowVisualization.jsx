@@ -90,7 +90,8 @@ const FlowVisualization = () => {
     fromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
     toTokens: '',
     crcAmount: '1000',  // Amount in ETH
-    amount: '1000000000000000000000' // Amount in Wei (will be calculated from crcAmount)
+    amount: '1000000000000000000000', // Amount in Wei (will be calculated from crcAmount)
+    withWrap: true // New flag for API endpoint
   });
   const [formErrors, setFormErrors] = useState({});
   const [pathData, setPathData] = useState(null);
@@ -99,7 +100,6 @@ const FlowVisualization = () => {
   const [tooltip, setTooltip] = useState({ text: '', position: null });
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [wrappedTokens, setWrappedTokens] = useState([]);
-  const [showWrappedTokens, setShowWrappedTokens] = useState(true);
   
   // References for Cytoscape
   const cyRef = useRef(null);
@@ -158,6 +158,14 @@ const FlowVisualization = () => {
     }
   };
 
+  // Handle toggle change for withWrap option
+  const handleWithWrapToggle = () => {
+    setFormData(prev => ({
+      ...prev,
+      withWrap: !prev.withWrap
+    }));
+  };
+
   // Function to fetch path data from API
   const fetchPathData = async () => {
     setIsLoading(true);
@@ -166,7 +174,11 @@ const FlowVisualization = () => {
     try {
       // Filter out empty values from the query parameters
       const queryParams = new URLSearchParams(
-        Object.entries(formData).filter(([key, value]) => value !== '' && key !== 'crcAmount')
+        Object.entries(formData)
+          .filter(([key, value]) => 
+            // Include withWrap even if it's false
+            (value !== '' && key !== 'crcAmount') || key === 'withWrap'
+          )
       );
       
       const url = `${API_ENDPOINT}/findPath?${queryParams}`;
@@ -318,9 +330,6 @@ const FlowVisualization = () => {
               'target-arrow-color': '#94A3B8',
               'target-arrow-shape': 'triangle',
               'curve-style': 'bezier',
-              'visibility': function(ele) {
-                return (!showWrappedTokens && ele.data('isWrapped')) ? 'hidden' : 'visible';
-              },
               'line-style': function(ele) {
                 return ele.data('isWrapped') ? 'dashed' : 'solid';
               },
@@ -376,7 +385,7 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
     };
-  }, [pathData, formData.from, formData.to, wrappedTokens, showWrappedTokens]);
+  }, [pathData, formData.from, formData.to, wrappedTokens]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -455,6 +464,13 @@ const FlowVisualization = () => {
                         placeholder="0x..."
                       />
                     </div>
+                    <div>
+                      <ToggleSwitch
+                        isEnabled={formData.withWrap}
+                        onToggle={handleWithWrapToggle}
+                        label="Include Wrapped Tokens"
+                      />
+                    </div>
                     <Button 
                       className="w-full"
                       onClick={fetchPathData}
@@ -472,16 +488,6 @@ const FlowVisualization = () => {
                       <p className="text-sm font-medium">Max Flow</p>
                       <p className="text-lg">{(Number(pathData.maxFlow) / 1e18).toFixed(6)}</p>
                     </CardContent>
-                  </Card>
-
-                  <Card>
-                  <CardContent className="pt-4">
-                    <ToggleSwitch
-                      isEnabled={showWrappedTokens}
-                      onToggle={() => setShowWrappedTokens(!showWrappedTokens)}
-                      label="Show Wrapped Tokens"
-                    />
-                  </CardContent>
                   </Card>
                 </>
                 )}
