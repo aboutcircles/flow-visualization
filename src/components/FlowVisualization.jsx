@@ -4,7 +4,7 @@ import klay from 'cytoscape-klay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
 import Header from '@/components/ui/header';
 import TransactionTable from '@/components/ui/transaction_table';
 import ToggleSwitch from '@/components/ui/toggle-switch';
@@ -13,7 +13,7 @@ import ToggleSwitch from '@/components/ui/toggle-switch';
 cytoscape.use(klay);
 
 // Define the API endpoint as a constant for easy updating
-const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
+const API_ENDPOINT = 'https://rpc.circlesubi.network/';
 
 // Function to fetch wrapped tokens
 const fetchWrappedTokens = async () => {
@@ -56,6 +56,17 @@ const fetchWrappedTokens = async () => {
   }
 };
 
+// Helper function to parse string of addresses into an array
+const parseAddressList = (addressString) => {
+  if (!addressString) return [];
+  
+  // Split by comma, newline, or space and filter out empty entries
+  return addressString
+    .split(/[\s,]+/)
+    .map(addr => addr.trim())
+    .filter(addr => addr && addr.startsWith('0x'));
+};
+
 // Tooltip component with improved formatting
 const Tooltip = ({ text, position }) => {
   if (!position) return null;
@@ -75,6 +86,75 @@ const Tooltip = ({ text, position }) => {
       {lines.map((line, index) => (
         <div key={index} className="whitespace-pre-wrap">{line}</div>
       ))}
+    </div>
+  );
+};
+
+// TokenInput component for handling multiple token inputs
+const TokenInput = ({ value, onChange, placeholder, label }) => {
+  const [inputValue, setInputValue] = useState('');
+  
+  // Parse the current value string into an array of tokens
+  const tokens = parseAddressList(value);
+  
+  const handleAddToken = () => {
+    if (inputValue && inputValue.startsWith('0x')) {
+      // Combine existing tokens with the new one and update parent
+      const updatedTokens = [...tokens, inputValue];
+      onChange(updatedTokens.join(','));
+      setInputValue('');
+    }
+  };
+  
+  const handleRemoveToken = (tokenToRemove) => {
+    const updatedTokens = tokens.filter(token => token !== tokenToRemove);
+    onChange(updatedTokens.join(','));
+  };
+  
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && inputValue) {
+      e.preventDefault();
+      handleAddToken();
+    }
+  };
+  
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-1">{label}</label>
+      <div className="flex mb-2">
+        <Input
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          placeholder={placeholder}
+          onKeyDown={handleKeyDown}
+          className="flex-1"
+        />
+        <Button 
+          type="button" 
+          onClick={handleAddToken}
+          className="ml-2"
+        >
+          <Plus size={16} />
+        </Button>
+      </div>
+      {tokens.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {tokens.map((token, index) => (
+            <div key={index} className="flex items-center bg-gray-100 rounded-md px-2 py-1">
+              <span className="text-xs font-mono mr-1 truncate" style={{ maxWidth: '120px' }}>
+                {token}
+              </span>
+              <button
+                type="button"
+                className="text-gray-500 hover:text-gray-700"
+                onClick={() => handleRemoveToken(token)}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -162,6 +242,14 @@ const FlowVisualization = () => {
     }
   };
 
+  // Handle token list changes
+  const handleTokensChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   // Handle toggle change for WithWrap option
   const handleWithWrapToggle = () => {
     setFormData(prev => ({
@@ -176,6 +264,10 @@ const FlowVisualization = () => {
     setError(null);
 
     try {
+      // Parse token strings into arrays
+      const fromTokensArray = parseAddressList(formData.FromTokens);
+      const toTokensArray = parseAddressList(formData.ToTokens);
+
       // Create the params object for the JSON-RPC request
       const params = {
         Source: formData.From,
@@ -184,12 +276,12 @@ const FlowVisualization = () => {
       };
 
       // Only add optional parameters if they have values
-      if (formData.FromTokens) {
-        params.FromTokens = formData.FromTokens;
+      if (fromTokensArray.length > 0) {
+        params.FromTokens = fromTokensArray;
       }
       
-      if (formData.ToTokens) {
-        params.ToTokens = formData.ToTokens;
+      if (toTokensArray.length > 0) {
+        params.ToTokens = toTokensArray;
       }
       
       // WithWrap is a boolean, so always include it
@@ -481,24 +573,22 @@ const FlowVisualization = () => {
                         inputMode="decimal"
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">From Token (Optional)</label>
-                      <Input
-                        name="fromTokens"
-                        value={formData.FromTokens}
-                        onChange={handleInputChange}
-                        placeholder="0x..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">To Token (Optional)</label>
-                      <Input
-                        name="toTokens"
-                        value={formData.ToTokens}
-                        onChange={handleInputChange}
-                        placeholder="0x..."
-                      />
-                    </div>
+                    
+                    {/* Token input components for multiple tokens */}
+                    <TokenInput
+                      value={formData.FromTokens}
+                      onChange={(value) => handleTokensChange('FromTokens', value)}
+                      placeholder="0x..."
+                      label="From Tokens (Optional, Add multiple)"
+                    />
+                    
+                    <TokenInput
+                      value={formData.ToTokens}
+                      onChange={(value) => handleTokensChange('ToTokens', value)}
+                      placeholder="0x..."
+                      label="To Tokens (Optional, Add multiple)"
+                    />
+                    
                     <div>
                       <ToggleSwitch
                         isEnabled={formData.WithWrap}
