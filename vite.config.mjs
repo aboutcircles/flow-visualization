@@ -23,6 +23,6 @@ export default defineConfig({
   preview: {
     host: "0.0.0.0",
     port: 8080,  
-    allowedHosts: "all"
+    allowedHosts: ["flow-viz-bm3ge.ondigitalocean.app"]
   }
 })
