@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
 import Header from '@/components/ui/header';
 import TransactionTable from '@/components/ui/transaction_table';
 import ToggleSwitch from '@/components/ui/toggle-switch';
+import FlowMatrixParams from './FlowMatrixParams';
 
 // Register the klay layout with Cytoscape
 cytoscape.use(klay);
@@ -659,6 +660,16 @@ const FlowVisualization = () => {
               maxFlow={pathData.maxFlow}
               onTransactionSelect={handleTransactionSelect}
               selectedTransactionId={selectedTransactionId}
+            />
+        </div>
+        )}
+        
+        {/* Flow Matrix Parameters Section */}
+        {pathData && (
+        <div className="p-4 bg-gray-50">
+            <FlowMatrixParams 
+              pathData={pathData} 
+              sender={formData.From}
             />
         </div>
         )}
