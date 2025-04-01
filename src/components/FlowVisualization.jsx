@@ -14,7 +14,7 @@ import FlowMatrixParams from './FlowMatrixParams';
 cytoscape.use(klay);
 
 // Define the API endpoint as a constant for easy updating
-const API_ENDPOINT = 'https://rpc.circlesubi.network/';
+const API_ENDPOINT =  'http://192.168.2.124:8547'; //'https://rpc.circlesubi.network/';
 
 // Function to fetch wrapped tokens
 const fetchWrappedTokens = async () => {
@@ -346,16 +346,36 @@ const FlowVisualization = () => {
   
       // Highlight selected edge
       if (transactionId) {
-        const selectedEdge = cyRef.current.getElementById(transactionId);
-        if (selectedEdge) {
-          selectedEdge.style({
-            'line-color': '#2563EB',
-            'target-arrow-color': '#2563EB',
-            'width': Math.max(selectedEdge.data('weight') * 1.5, 3)
+        // Find the edge in the table by its components rather than direct ID
+        const parts = transactionId.split('-');
+        if (parts.length >= 3) {
+          const fromAddr = parts[0];
+          const toAddr = parts[1];
+          const tokenOwner = parts[2];
+          
+          // Find edges that match the transaction components
+          const matchingEdges = cyRef.current.edges().filter(edge => {
+            const data = edge.data();
+            return (
+              data.originalFrom.toLowerCase() === fromAddr.toLowerCase() &&
+              data.originalTo.toLowerCase() === toAddr.toLowerCase() &&
+              data.originalTokenOwner.toLowerCase() === tokenOwner.toLowerCase()
+            );
           });
           
-          // Bring the edge to front
-          selectedEdge.select();
+          if (matchingEdges.length > 0) {
+            // Highlight all matching edges
+            matchingEdges.forEach(edge => {
+              edge.style({
+                'line-color': '#2563EB',
+                'target-arrow-color': '#2563EB',
+                'width': Math.max(edge.data('weight') * 1.5, 3)
+              });
+              
+              // Bring the edge to front
+              edge.select();
+            });
+          }
         }
       }
     }
@@ -376,34 +396,63 @@ const FlowVisualization = () => {
         nodes: new Set(),
         edges: []
       };
-
-      // Process transfers to create nodes and edges
+      
+      // Process transfers to create nodes and edges - fixed for token owner issue
+      const sourceAddress = formData.From.toLowerCase();
+      const sinkAddress = formData.To.toLowerCase();
+      
+      // Track which nodes are actually used in edges
+      const connectedNodes = new Set();
+      
+      // Add source and sink addresses to connected nodes
+      connectedNodes.add(sourceAddress);
+      connectedNodes.add(sinkAddress);
+      
+      // First pass: create all edges and track connected nodes
       pathData.transfers.forEach(transfer => {
-        elements.nodes.add(transfer.from);
-        elements.nodes.add(transfer.to);
-
+        const fromAddr = transfer.from.toLowerCase();
+        const toAddr = transfer.to.toLowerCase();
+        
+        // Record that these nodes are connected
+        connectedNodes.add(fromAddr);
+        connectedNodes.add(toAddr);
+        
         const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
         const flowValue = Number(transfer.value) / 1e18;
         const isWrappedToken = wrappedTokens.includes(transfer.tokenOwner.toLowerCase());
 
+        // Create a unique ID for each edge
+        const edgeId = `${fromAddr}-${toAddr}-${transfer.tokenOwner.toLowerCase()}-${Math.random().toString(36).substring(2, 9)}`;
+        
         elements.edges.push({
           data: {
-            id: `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`,
-            source: transfer.from,
-            target: transfer.to,
+            id: edgeId,
+            source: fromAddr,
+            target: toAddr,
             weight: Math.max(1, flowPercentage / 10),
             flowValue: flowValue,
             percentage: flowPercentage.toFixed(2),
-            tokenOwner: transfer.tokenOwner,
+            tokenOwner: transfer.tokenOwner.toLowerCase(),
             isWrapped: isWrappedToken,
+            // Track the original transfer for table selection
+            originalFrom: transfer.from,
+            originalTo: transfer.to,
+            originalTokenOwner: transfer.tokenOwner,
             fullInfo: `Flow: ${flowValue.toFixed(6)} tokens\nPercentage: ${flowPercentage.toFixed(2)}%\nToken (${isWrappedToken ? 'CRC20' : 'ERC1155'}): ${transfer.tokenOwner}`
           }
         });
       });
+      
+      // Second pass: add only connected nodes to the elements
+      connectedNodes.forEach(nodeId => {
+        elements.nodes.add(nodeId);
+      });
+      
+      // Log node and edge counts for debugging
+      console.log(`Creating graph with ${connectedNodes.size} nodes and ${elements.edges.length} edges`);
+      console.log('Connected nodes:', Array.from(connectedNodes));
 
       // Determine if source and sink are the same
-      const sourceAddress = formData.From.toLowerCase();
-      const sinkAddress = formData.To.toLowerCase();
       const isSameSourceSink = sourceAddress === sinkAddress;
 
       // Convert nodes set to array of node objects
@@ -412,16 +461,25 @@ const FlowVisualization = () => {
         const isSink = id.toLowerCase() === sinkAddress;
         
         let color;
-        if (isSameSourceSink && (isSource || isSink)) {
-          color = 'linear-gradient(90deg, #3B82F6 50%, #EF4444 50%)';
+        let label = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        
+        if (isSameSourceSink && isSource && isSink) {
+          color = '#e0f63b';
+          label = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        } else if (isSource) {
+          color = '#3B82F6'; // Blue for source
+          label = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        } else if (isSink) {
+          color = '#EF4444'; // Red for sink
+          label = `${id.slice(0, 6)}...${id.slice(-4)}`;
         } else {
-          color = isSource ? '#3B82F6' : isSink ? '#EF4444' : '#CBD5E1';
+          color = '#CBD5E1'; // Gray for intermediate nodes
         }
 
         return {
           data: { 
             id,
-            label: `${id.slice(0, 6)}...${id.slice(-4)}`,
+            label,
             fullAddress: id,
             isSource,
             isSink,
@@ -430,7 +488,7 @@ const FlowVisualization = () => {
         };
       });
 
-      // Create Cytoscape instance
+      // Create Cytoscape instance with improved layout options
       const cy = cytoscape({
         container: containerRef.current,
         elements: {
@@ -445,9 +503,12 @@ const FlowVisualization = () => {
               'label': 'data(label)',
               'text-valign': 'center',
               'text-halign': 'center',
+              'text-wrap': 'wrap',
+              'text-max-width': '100px',
               'font-size': '10px',
-              'width': '40px',
-              'height': '40px'
+              'width': '45px',
+              'height': '45px',
+              'text-margin-y': '10px'
             }
           },
           {
@@ -466,15 +527,33 @@ const FlowVisualization = () => {
               },
               'text-rotation': 'autorotate',
               'font-size': '8px',
-              'text-margin-y': '-10px'
+              'text-margin-y': '-10px',
+              'text-outline-color': '#ffffff',
+              'text-outline-width': 1
+            }
+          },
+          {
+            selector: '.highlighted',
+            style: {
+              'line-color': '#2563EB',
+              'target-arrow-color': '#2563EB',
+              'z-index': 999
             }
           }
         ],
         layout: {
           name: 'klay',
-          rankDir: 'LR',
-          padding: 50,
-          spacingFactor: 1.5
+          nodeDimensionsIncludeLabels: true,
+          klay: {
+            direction: 'RIGHT',
+            edgeSpacingFactor: 2.0,
+            inLayerSpacingFactor: 2.0,
+            spacing: 50,
+            thoroughness: 10,
+            nodeLayering: 'NETWORK_SIMPLEX',
+            separateConnectedComponents: false,
+            edgeRouting: 'SPLINES'
+          }
         }
       });
 
@@ -501,7 +580,31 @@ const FlowVisualization = () => {
         setTooltip({ text: '', position: null });
       });
 
+      // Add click handler for edges
+      cy.on('click', 'edge', (event) => {
+        const edge = event.target;
+        const data = edge.data();
+        // Create transaction ID from original transaction data
+        const transactionId = `${data.originalFrom}-${data.originalTo}-${data.originalTokenOwner}`;
+        handleTransactionSelect(transactionId);
+      });
+
       cyRef.current = cy;
+
+      // Run layout again after a short delay to ensure proper positioning
+      setTimeout(() => {
+        if (cyRef.current) {
+          cyRef.current.layout({
+            name: 'klay',
+            nodeDimensionsIncludeLabels: true,
+            klay: {
+              direction: 'RIGHT',
+              spacing: 50,
+              thoroughness: 10
+            }
+          }).run();
+        }
+      }, 100);
 
     } catch (error) {
       console.error('Error initializing Cytoscape:', error);
