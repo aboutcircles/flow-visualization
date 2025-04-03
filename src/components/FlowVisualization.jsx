@@ -14,7 +14,7 @@ import FlowMatrixParams from './FlowMatrixParams';
 cytoscape.use(klay);
 
 // Define the API endpoint as a constant for easy updating
-const API_ENDPOINT =  'https://rpc.circlesubi.network/';
+const API_ENDPOINT =  'https://rpc.aboutcircles.com/'
 
 // Function to fetch wrapped tokens
 const fetchWrappedTokens = async () => {
