@@ -11,6 +11,7 @@ import ToggleSwitch from '@/components/ui/toggle-switch';
 import FlowMatrixParams from './FlowMatrixParams';
 import {CirclesData, CirclesRpc} from "@circles-sdk/data";
 import {Profiles} from "@circles-sdk/profiles";
+import * as SliderPrimitive from '@radix-ui/react-slider';
 
 // Register the klay layout with Cytoscape
 cytoscape.use(klay);
@@ -143,6 +144,10 @@ const FlowVisualization = () => {
   const [tokenOwnerProfiles, setTokenOwnerProfiles] = useState({});
   const [nodeProfiles, setNodeProfiles] = useState({});
   const [pathData, setPathData] = useState(null);
+  const [minCapacity, setMinCapacity] = useState(0);
+  const [maxCapacity, setMaxCapacity] = useState(0);
+  const [boundMin, setBoundMin] = useState(0);
+  const [boundMax, setBoundMax] = useState(0);
   const circlesData = useRef(new CirclesData(new CirclesRpc(API_ENDPOINT))).current;
   const circlesProfiles = useRef(new Profiles(API_ENDPOINT + "profiles/")).current;
 
@@ -229,6 +234,20 @@ const FlowVisualization = () => {
     };
     loadNodeProfiles();
   }, [pathData, circlesProfiles]);
+
+  // Set the min. and max. of the value filter slider
+  useEffect(() => {
+    if (!pathData) return;
+    // pull out all the flowValues in token units
+    const values = pathData.transfers.map(t => Number(t.value) / 1e18);
+    const trueMin = Math.min(...values);
+    const trueMax = Math.max(...values);
+    // initialize your thumbs to the full span
+    setBoundMin(trueMin);
+    setBoundMax(trueMax);
+    setMinCapacity(trueMin);
+    setMaxCapacity(trueMax);
+  }, [pathData]);
 
   // Convert ETH to Wei
   const ethToWei = (crcAmount) => {
@@ -354,14 +373,6 @@ const FlowVisualization = () => {
         throw new Error(`JSON-RPC error: ${responseData.error.message || JSON.stringify(responseData.error)}`);
       }
 
-      console.log('API Response:', responseData);
-      // TODO:
-      // const loadWrappedTokens = async () => {
-      //   const tokens = await fetchTokensInPath();
-      //   setWrappedTokens(tokens);
-      // };
-      // loadWrappedTokens();
-
       // Extract the result data
       const data = responseData.result;
       setPathData(data);
@@ -434,6 +445,11 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
 
+      const all = pathData.transfers.map(t => Number(t.value)/1e18);
+      const dmin = Math.min(...all), dmax = Math.max(...all);
+      const minPx = 1, maxPx = 10;
+      const widthExpr = `mapData(flowValue,${dmin},${dmax},${minPx},${maxPx})`;
+
       // Prepare graph elements
       const elements = {
         nodes: new Set(),
@@ -462,7 +478,6 @@ const FlowVisualization = () => {
 
         const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
         const flowValue = Number(transfer.value) / 1e18;
-        console.log("wrappedTokens.includes(transfer.tokenOwner.toLowerCase()):", wrappedTokens, transfer.tokenOwner, transfer);
         const isWrappedToken = wrappedTokens.includes(transfer.tokenOwner.toLowerCase());
 
         // Create a unique ID for each edge
@@ -563,7 +578,7 @@ const FlowVisualization = () => {
           {
             selector: 'edge',
             style: {
-              'width': 'data(weight)',
+              'width': widthExpr,
               'line-color': '#94A3B8',
               'target-arrow-color': '#94A3B8',
               'target-arrow-shape': 'triangle',
@@ -711,6 +726,24 @@ const FlowVisualization = () => {
     });
   }, [tokenOwnerProfiles]);
 
+  // whenever minCapacity changes, show/hide edges
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    cy.batch(() => {
+      cy.edges().forEach(edge => {
+        const v = edge.data('flowValue');
+        // hide anything outside [minCapacity, maxCapacity]
+        if (v < minCapacity || v > maxCapacity) {
+          edge.hide();
+        } else {
+          edge.show();
+        }
+      });
+    });
+  }, [minCapacity, maxCapacity]);
+
   return (
       <div className="flex flex-col h-screen bg-gray-50">
         <Header />
@@ -793,6 +826,33 @@ const FlowVisualization = () => {
                               label="Include Wrapped Tokens"
                           />
                         </div>
+
+                        {pathData && (
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium mb-1">
+                                Capacity range: {minCapacity.toFixed(3)} → {maxCapacity.toFixed(3)}
+                              </label>
+                              <SliderPrimitive.Root
+                                  className="relative flex items-center select-none touch-none w-full h-5"
+                                  min={boundMin}
+                                  max={boundMax}
+                                  step={0.001}
+                                  value={[minCapacity, maxCapacity]}
+                                  onValueChange={([newMin, newMax]) => {
+                                    setMinCapacity(newMin);
+                                    setMaxCapacity(newMax);
+                                  }}
+                                  aria-label="Edge capacity range"
+                              >
+                                <SliderPrimitive.Track className="bg-gray-200 relative flex-1 h-1 rounded-full">
+                                  <SliderPrimitive.Range className="absolute bg-blue-500 h-full rounded-full" />
+                                </SliderPrimitive.Track>
+                                <SliderPrimitive.Thumb className="block w-4 h-4 bg-white border-2 border-blue-500 rounded-full shadow" />
+                                <SliderPrimitive.Thumb className="block w-4 h-4 bg-white border-2 border-blue-500 rounded-full shadow" />
+                              </SliderPrimitive.Root>
+                            </div>
+                        )}
+
                         <Button
                             className="w-full"
                             onClick={fetchPathData}
