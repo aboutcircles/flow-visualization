@@ -9,6 +9,8 @@ import Header from '@/components/ui/header';
 import TransactionTable from '@/components/ui/transaction_table';
 import ToggleSwitch from '@/components/ui/toggle-switch';
 import FlowMatrixParams from './FlowMatrixParams';
+import {CirclesData, CirclesRpc} from "@circles-sdk/data";
+import {Profiles} from "@circles-sdk/profiles";
 
 // Register the klay layout with Cytoscape
 cytoscape.use(klay);
@@ -16,51 +18,10 @@ cytoscape.use(klay);
 // Define the API endpoint as a constant for easy updating
 const API_ENDPOINT =  'https://rpc.aboutcircles.com/'
 
-// Function to fetch wrapped tokens
-const fetchWrappedTokens = async () => {
-  try {
-    const response = await fetch(API_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'circles_query',
-        params: [{
-          Namespace: 'V_Crc',
-          Table: 'Tokens',
-          Limit: 100000,
-          Columns: ['token'],
-          Filter: [{
-            Type: 'FilterPredicate',
-            FilterType: 'Equals',
-            Column: 'version',
-            Value: 2
-          }, {
-            Type: 'FilterPredicate',
-            FilterType: 'Like',
-            Column: 'type',
-            Value: '%ERC20WrapperDeployed%'
-          }],
-          Order: []
-        }]
-      })
-    });
-
-    const data = await response.json();
-    return data.result.rows.map(row => row[0].toLowerCase());
-  } catch (error) {
-    console.error('Error fetching wrapped tokens:', error);
-    return [];
-  }
-};
-
 // Helper function to parse string of addresses into an array
 const parseAddressList = (addressString) => {
   if (!addressString) return [];
-  
+
   // Split by comma, newline, or space and filter out empty entries
   return addressString
     .split(/[\s,]+/)
@@ -71,15 +32,15 @@ const parseAddressList = (addressString) => {
 // Tooltip component with improved formatting
 const Tooltip = ({ text, position }) => {
   if (!position) return null;
-  
+
   // Split the text by newlines and create separate lines
   const lines = text.split('\n');
-  
+
   return (
-    <div 
+    <div
       className="absolute z-50 bg-black/75 text-white p-2 rounded text-sm"
-      style={{ 
-        left: position.x + 10, 
+      style={{
+        left: position.x + 10,
         top: position.y + 10,
         maxWidth: '400px'
       }}
@@ -94,10 +55,10 @@ const Tooltip = ({ text, position }) => {
 // TokenInput component for handling multiple token inputs
 const TokenInput = ({ value, onChange, placeholder, label }) => {
   const [inputValue, setInputValue] = useState('');
-  
+
   // Parse the current value string into an array of tokens
   const tokens = parseAddressList(value);
-  
+
   const handleAddToken = () => {
     if (inputValue && inputValue.startsWith('0x')) {
       // Combine existing tokens with the new one and update parent
@@ -106,19 +67,19 @@ const TokenInput = ({ value, onChange, placeholder, label }) => {
       setInputValue('');
     }
   };
-  
+
   const handleRemoveToken = (tokenToRemove) => {
     const updatedTokens = tokens.filter(token => token !== tokenToRemove);
     onChange(updatedTokens.join(','));
   };
-  
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && inputValue) {
       e.preventDefault();
       handleAddToken();
     }
   };
-  
+
   return (
     <div>
       <label className="block text-sm font-medium mb-1">{label}</label>
@@ -130,8 +91,8 @@ const TokenInput = ({ value, onChange, placeholder, label }) => {
           onKeyDown={handleKeyDown}
           className="flex-1"
         />
-        <Button 
-          type="button" 
+        <Button
+          type="button"
           onClick={handleAddToken}
           className="ml-2"
         >
@@ -173,31 +134,86 @@ const FlowVisualization = () => {
     WithWrap: true // New flag for API endpoint
   });
   const [formErrors, setFormErrors] = useState({});
-  const [pathData, setPathData] = useState(null);
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [tooltip, setTooltip] = useState({ text: '', position: null });
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [wrappedTokens, setWrappedTokens] = useState([]);
-  
+  const [tokenInfo, setTokenInfo] = useState({});
+  const [tokenOwnerProfiles, setTokenOwnerProfiles] = useState({});
+  const [pathData, setPathData] = useState(null);
+  const circlesData = useRef(new CirclesData(new CirclesRpc(API_ENDPOINT))).current;
+  const circlesProfiles = useRef(new Profiles(API_ENDPOINT + "profiles/")).current;
+
   // References for Cytoscape
   const cyRef = useRef(null);
   const containerRef = useRef(null);
 
-  // Fetch wrapped tokens on component mount
+  // Once we have pathData, fetch info for each tokenOwner in the path
   useEffect(() => {
-    const loadWrappedTokens = async () => {
-      const tokens = await fetchWrappedTokens();
-      setWrappedTokens(tokens);
+    if (!pathData) return;
+
+    const loadTokenInfos = async () => {
+      // Collect unique tokenOwner addresses from transfers
+      const tokenOwners = Array.from(
+          new Set(pathData.transfers.map(t => t.tokenOwner.toLowerCase()))
+      );
+
+      // Fetch token info rows via the SDK
+      const infoRows = await circlesData.getTokenInfoBatch(tokenOwners);
+
+      // Keep only ERC20 wrapper deployments
+      const wrapperTypes = [
+        'CrcV2_ERC20WrapperDeployed_Inflationary',
+        'CrcV2_ERC20WrapperDeployed_Demurraged'
+      ];
+
+      const wrapped = infoRows
+          .filter(row => wrapperTypes.includes(row.type))
+          .map(row => row.tokenOwner.toLowerCase());
+
+      const tokenInfoMap = infoRows.reduce((p,c) => {
+        p[c.tokenOwner.toLowerCase()] = c;
+        return p;
+      }, {});
+
+      setWrappedTokens(wrapped);
+      setTokenInfo(tokenInfoMap);
     };
-    loadWrappedTokens();
-  }, []);
+
+    loadTokenInfos();
+  }, [pathData, circlesData]);
+
+  // fetch profiles of token owners in batches of 50. In the end setTokenOwnerProfiles.
+  useEffect(() => {
+    const addresses = Object.keys(tokenInfo);
+    if (addresses.length === 0) return;
+
+    const loadProfiles = async () => {
+      const batches = [];
+      for (let i = 0; i < addresses.length; i += 50) {
+        batches.push(addresses.slice(i, i + 50));
+      }
+
+      const profilesMap = {};
+      for (const batch of batches) {
+        const profiles = await circlesProfiles.searchByAddresses(batch, { fetchComplete: true });
+        profiles.forEach(profile => {
+          profilesMap[profile.address.toLowerCase()] = profile;
+        });
+      }
+
+      setTokenOwnerProfiles(profilesMap);
+    };
+
+    loadProfiles();
+  }, [tokenInfo, circlesProfiles]);
 
   // Convert ETH to Wei
   const ethToWei = (crcAmount) => {
     try {
       if (!crcAmount || isNaN(crcAmount)) return '0';
-      
+
       // Convert to Wei (multiply by 10^18)
       const [whole, fraction = ''] = crcAmount.toString().split('.');
       const decimals = fraction.padEnd(18, '0');
@@ -212,7 +228,7 @@ const FlowVisualization = () => {
   // Handle form input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    
+
     if (name === 'crcAmount') {
       // For amount field, store ETH value and calculate Wei
       const weiValue = ethToWei(value);
@@ -224,17 +240,17 @@ const FlowVisualization = () => {
     } else {
       // Map UI field names to the capitalized API parameter names
       const mappedFieldName = name === 'from' ? 'From' :
-                              name === 'to' ? 'To' : 
-                              name === 'fromTokens' ? 'FromTokens' : 
+                              name === 'to' ? 'To' :
+                              name === 'fromTokens' ? 'FromTokens' :
                               name === 'toTokens' ? 'ToTokens' : name;
-      
+
       // For other fields, store value as is
       setFormData(prev => ({
         ...prev,
         [mappedFieldName]: value
       }));
     }
-    
+
     if (formErrors[name]) {
       setFormErrors(prev => ({
         ...prev,
@@ -280,11 +296,11 @@ const FlowVisualization = () => {
       if (fromTokensArray.length > 0) {
         params.FromTokens = fromTokensArray;
       }
-      
+
       if (toTokensArray.length > 0) {
         params.ToTokens = toTokensArray;
       }
-      
+
       // WithWrap is a boolean, so always include it
       params.WithWrap = formData.WithWrap;
 
@@ -305,20 +321,26 @@ const FlowVisualization = () => {
         },
         body: JSON.stringify(requestBody)
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`API error: ${response.status} ${response.statusText}\n${errorText}`);
       }
-      
+
       const responseData = await response.json();
-      
+
       if (responseData.error) {
         throw new Error(`JSON-RPC error: ${responseData.error.message || JSON.stringify(responseData.error)}`);
       }
-      
+
       console.log('API Response:', responseData);
-      
+      // TODO:
+      // const loadWrappedTokens = async () => {
+      //   const tokens = await fetchTokensInPath();
+      //   setWrappedTokens(tokens);
+      // };
+      // loadWrappedTokens();
+
       // Extract the result data
       const data = responseData.result;
       setPathData(data);
@@ -333,7 +355,7 @@ const FlowVisualization = () => {
 
   const handleTransactionSelect = (transactionId) => {
     setSelectedTransactionId(transactionId);
-    
+
     if (cyRef.current) {
       // Reset all edges to default style
       cyRef.current.edges().forEach(edge => {
@@ -343,7 +365,7 @@ const FlowVisualization = () => {
           'width': edge.data('weight')
         });
       });
-  
+
       // Highlight selected edge
       if (transactionId) {
         // Find the edge in the table by its components rather than direct ID
@@ -352,7 +374,7 @@ const FlowVisualization = () => {
           const fromAddr = parts[0];
           const toAddr = parts[1];
           const tokenOwner = parts[2];
-          
+
           // Find edges that match the transaction components
           const matchingEdges = cyRef.current.edges().filter(edge => {
             const data = edge.data();
@@ -362,7 +384,7 @@ const FlowVisualization = () => {
               data.originalTokenOwner.toLowerCase() === tokenOwner.toLowerCase()
             );
           });
-          
+
           if (matchingEdges.length > 0) {
             // Highlight all matching edges
             matchingEdges.forEach(edge => {
@@ -371,7 +393,7 @@ const FlowVisualization = () => {
                 'target-arrow-color': '#2563EB',
                 'width': Math.max(edge.data('weight') * 1.5, 3)
               });
-              
+
               // Bring the edge to front
               edge.select();
             });
@@ -396,34 +418,43 @@ const FlowVisualization = () => {
         nodes: new Set(),
         edges: []
       };
-      
+
       // Process transfers to create nodes and edges - fixed for token owner issue
       const sourceAddress = formData.From.toLowerCase();
       const sinkAddress = formData.To.toLowerCase();
-      
+
       // Track which nodes are actually used in edges
       const connectedNodes = new Set();
-      
+
       // Add source and sink addresses to connected nodes
       connectedNodes.add(sourceAddress);
       connectedNodes.add(sinkAddress);
-      
+
+      // Load all token info
+        const loadWrappedTokens = async () => {
+          const tokens = await fetchTokensInPath();
+          setWrappedTokens(tokens);
+        };
+        loadWrappedTokens();
+
       // First pass: create all edges and track connected nodes
       pathData.transfers.forEach(transfer => {
         const fromAddr = transfer.from.toLowerCase();
         const toAddr = transfer.to.toLowerCase();
-        
+
         // Record that these nodes are connected
         connectedNodes.add(fromAddr);
         connectedNodes.add(toAddr);
-        
+
         const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
         const flowValue = Number(transfer.value) / 1e18;
         const isWrappedToken = wrappedTokens.includes(transfer.tokenOwner.toLowerCase());
 
         // Create a unique ID for each edge
         const edgeId = `${fromAddr}-${toAddr}-${transfer.tokenOwner.toLowerCase()}-${Math.random().toString(36).substring(2, 9)}`;
-        
+        const profile = tokenOwnerProfiles[transfer.tokenOwner.toLowerCase()];
+        const ownerLabel = profile?.name || `${transfer.tokenOwner.slice(0,6)}...${transfer.tokenOwner.slice(-4)}`;
+
         elements.edges.push({
           data: {
             id: edgeId,
@@ -432,22 +463,23 @@ const FlowVisualization = () => {
             weight: Math.max(1, flowPercentage / 10),
             flowValue: flowValue,
             percentage: flowPercentage.toFixed(2),
+            edgeLabel: ownerLabel,
             tokenOwner: transfer.tokenOwner.toLowerCase(),
             isWrapped: isWrappedToken,
             // Track the original transfer for table selection
             originalFrom: transfer.from,
             originalTo: transfer.to,
             originalTokenOwner: transfer.tokenOwner,
-            fullInfo: `Flow: ${flowValue.toFixed(6)} tokens\nPercentage: ${flowPercentage.toFixed(2)}%\nToken (${isWrappedToken ? 'CRC20' : 'ERC1155'}): ${transfer.tokenOwner}`
+            fullInfo: `Flow: ${flowValue.toFixed(6)} tokens\nPercentage: ${flowPercentage.toFixed(2)}%\nToken (${isWrappedToken ? 'CRC20' : 'ERC1155'}): ${transfer.tokenOwner}\n${ownerLabel}`
           }
         });
       });
-      
+
       // Second pass: add only connected nodes to the elements
       connectedNodes.forEach(nodeId => {
         elements.nodes.add(nodeId);
       });
-      
+
       // Log node and edge counts for debugging
       console.log(`Creating graph with ${connectedNodes.size} nodes and ${elements.edges.length} edges`);
       console.log('Connected nodes:', Array.from(connectedNodes));
@@ -459,10 +491,10 @@ const FlowVisualization = () => {
       const nodeElements = Array.from(elements.nodes).map(id => {
         const isSource = id.toLowerCase() === sourceAddress;
         const isSink = id.toLowerCase() === sinkAddress;
-        
+
         let color;
         let label = `${id.slice(0, 6)}...${id.slice(-4)}`;
-        
+
         if (isSameSourceSink && isSource && isSink) {
           color = '#e0f63b';
           label = `${id.slice(0, 6)}...${id.slice(-4)}`;
@@ -477,7 +509,7 @@ const FlowVisualization = () => {
         }
 
         return {
-          data: { 
+          data: {
             id,
             label,
             fullAddress: id,
@@ -523,7 +555,7 @@ const FlowVisualization = () => {
                 return ele.data('isWrapped') ? 'dashed' : 'solid';
               },
               'label': function(ele) {
-                return ele.data('percentage') + '%';
+                return ele.data('edgeLabel') + " " + ele.data('percentage') + '%';
               },
               'text-rotation': 'autorotate',
               'font-size': '8px',
@@ -616,7 +648,7 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
     };
-  }, [pathData, formData.From, formData.To, wrappedTokens]);
+  }, [pathData, formData.From, formData.To, wrappedTokens, tokenOwnerProfiles]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -624,7 +656,7 @@ const FlowVisualization = () => {
       <div className="flex flex-col mt-16">
         <div className="flex flex-1 min-h-[50vh]">
           {/* Sidebar with collapsible functionality */}
-          <div 
+          <div
             className={`
               transform transition-all duration-300 ease-in-out
               bg-white shadow-lg relative
@@ -677,7 +709,7 @@ const FlowVisualization = () => {
                         inputMode="decimal"
                       />
                     </div>
-                    
+
                     {/* Token input components for multiple tokens */}
                     <TokenInput
                       value={formData.FromTokens}
@@ -685,14 +717,14 @@ const FlowVisualization = () => {
                       placeholder="0x..."
                       label="From Tokens (Optional, Add multiple)"
                     />
-                    
+
                     <TokenInput
                       value={formData.ToTokens}
                       onChange={(value) => handleTokensChange('ToTokens', value)}
                       placeholder="0x..."
                       label="To Tokens (Optional, Add multiple)"
                     />
-                    
+
                     <div>
                       <ToggleSwitch
                         isEnabled={formData.WithWrap}
@@ -700,7 +732,7 @@ const FlowVisualization = () => {
                         label="Include Wrapped Tokens"
                       />
                     </div>
-                    <Button 
+                    <Button
                       className="w-full"
                       onClick={fetchPathData}
                       disabled={isLoading}
@@ -758,20 +790,20 @@ const FlowVisualization = () => {
         {pathData && (
         <div className="p-4 bg-gray-50">
             <h2 className="text-lg font-semibold mb-4">Transactions</h2>
-            <TransactionTable 
-              transfers={pathData.transfers} 
+            <TransactionTable
+              transfers={pathData.transfers}
               maxFlow={pathData.maxFlow}
               onTransactionSelect={handleTransactionSelect}
               selectedTransactionId={selectedTransactionId}
             />
         </div>
         )}
-        
+
         {/* Flow Matrix Parameters Section */}
         {pathData && (
         <div className="p-4 bg-gray-50">
-            <FlowMatrixParams 
-              pathData={pathData} 
+            <FlowMatrixParams
+              pathData={pathData}
               sender={formData.From}
             />
         </div>
