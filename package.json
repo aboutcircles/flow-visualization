@@ -24,7 +24,10 @@
     "react-dom": "^18.2.0",
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7",
-    "viem": "^2.23.14"
+    "viem": "^2.23.14",
+    "@circles-sdk/data": "^0.23.0",
+    "@circles-sdk/profiles": "^0.23.0",
+    "multihashes": "^4.0.3"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
