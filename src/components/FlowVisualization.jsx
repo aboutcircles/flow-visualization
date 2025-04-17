@@ -171,12 +171,14 @@ const FlowVisualization = () => {
 
       const wrapped = infoRows
           .filter(row => wrapperTypes.includes(row.type))
-          .map(row => row.tokenOwner.toLowerCase());
+          .map(row => row.token.toLowerCase());
 
       const tokenInfoMap = infoRows.reduce((p,c) => {
-        p[c.tokenOwner.toLowerCase()] = c;
+        p[c.token.toLowerCase()] = c;
         return p;
       }, {});
+
+      console.log("Wrapped token in path:", wrapped);
 
       setWrappedTokens(wrapped);
       setTokenInfo(tokenInfoMap);
@@ -460,6 +462,7 @@ const FlowVisualization = () => {
 
         const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
         const flowValue = Number(transfer.value) / 1e18;
+        console.log("wrappedTokens.includes(transfer.tokenOwner.toLowerCase()):", wrappedTokens, transfer.tokenOwner, transfer);
         const isWrappedToken = wrappedTokens.includes(transfer.tokenOwner.toLowerCase());
 
         // Create a unique ID for each edge
@@ -662,7 +665,7 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
     };
-  }, [pathData]);
+  }, [pathData, wrappedTokens]);
 
   // patch node labels/tooltips as nodeProfiles arrive
   useEffect(() => {
