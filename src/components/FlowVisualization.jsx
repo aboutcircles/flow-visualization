@@ -192,6 +192,22 @@ const FlowVisualization = () => {
     loadTokenInfos();
   }, [pathData, circlesData]);
 
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    const minPx = 1;  // minimum rendered width
+    const maxPx = 10; // maximum rendered width
+
+    // Build the mapData call on one line
+    const expr = `mapData(flowValue,${minCapacity},${maxCapacity},${minPx},${maxPx})`;
+
+    cy.style()
+        .selector('edge')
+        .style('width', expr)
+        .update();
+  }, [minCapacity, maxCapacity]);
+
   // fetch profiles of token owners in batches of 50. In the end setTokenOwnerProfiles.
   useEffect(() => {
     const addresses = Object.keys(tokenInfo);
@@ -836,7 +852,7 @@ const FlowVisualization = () => {
                                   className="relative flex items-center select-none touch-none w-full h-5"
                                   min={boundMin}
                                   max={boundMax}
-                                  step={0.001}
+                                  step={1}
                                   value={[minCapacity, maxCapacity]}
                                   onValueChange={([newMin, newMax]) => {
                                     setMinCapacity(newMin);
