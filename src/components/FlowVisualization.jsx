@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import cytoscape from 'cytoscape';
 import klay from 'cytoscape-klay';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
+import {Card, CardContent} from '@/components/ui/card';
+import {Input} from '@/components/ui/input';
+import {Button} from '@/components/ui/button';
+import {ChevronLeft, ChevronRight, Plus, X} from 'lucide-react';
 import Header from '@/components/ui/header';
 import TransactionTable from '@/components/ui/transaction_table';
 import ToggleSwitch from '@/components/ui/toggle-switch';
@@ -17,7 +17,7 @@ import * as SliderPrimitive from '@radix-ui/react-slider';
 cytoscape.use(klay);
 
 // Define the API endpoint as a constant for easy updating
-const API_ENDPOINT =  'https://rpc.aboutcircles.com/'
+const API_ENDPOINT = 'https://rpc.aboutcircles.com/'
 
 // Helper function to parse string of addresses into an array
 const parseAddressList = (addressString) => {
@@ -25,36 +25,36 @@ const parseAddressList = (addressString) => {
 
   // Split by comma, newline, or space and filter out empty entries
   return addressString
-      .split(/[\s,]+/)
-      .map(addr => addr.trim())
-      .filter(addr => addr && addr.startsWith('0x'));
+    .split(/[\s,]+/)
+    .map(addr => addr.trim())
+    .filter(addr => addr && addr.startsWith('0x'));
 };
 
 // Tooltip component with improved formatting
-const Tooltip = ({ text, position }) => {
+const Tooltip = ({text, position}) => {
   if (!position) return null;
 
   // Split the text by newlines and create separate lines
   const lines = text.split('\n');
 
   return (
-      <div
-          className="absolute z-50 bg-black/75 text-white p-2 rounded text-sm"
-          style={{
-            left: position.x + 10,
-            top: position.y + 10,
-            maxWidth: '400px'
-          }}
-      >
-        {lines.map((line, index) => (
-            <div key={index} className="whitespace-pre-wrap">{line}</div>
-        ))}
-      </div>
+    <div
+      className="absolute z-50 bg-black/75 text-white p-2 rounded text-sm"
+      style={{
+        left: position.x + 10,
+        top: position.y + 10,
+        maxWidth: '400px'
+      }}
+    >
+      {lines.map((line, index) => (
+        <div key={index} className="whitespace-pre-wrap">{line}</div>
+      ))}
+    </div>
   );
 };
 
 // TokenInput component for handling multiple token inputs
-const TokenInput = ({ value, onChange, placeholder, label }) => {
+const TokenInput = ({value, onChange, placeholder, label}) => {
   const [inputValue, setInputValue] = useState('');
 
   // Parse the current value string into an array of tokens
@@ -82,43 +82,43 @@ const TokenInput = ({ value, onChange, placeholder, label }) => {
   };
 
   return (
-      <div>
-        <label className="block text-sm font-medium mb-1">{label}</label>
-        <div className="flex mb-2">
-          <Input
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder={placeholder}
-              onKeyDown={handleKeyDown}
-              className="flex-1"
-          />
-          <Button
-              type="button"
-              onClick={handleAddToken}
-              className="ml-2"
-          >
-            <Plus size={16} />
-          </Button>
-        </div>
-        {tokens.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {tokens.map((token, index) => (
-                  <div key={index} className="flex items-center bg-gray-100 rounded-md px-2 py-1">
-              <span className="text-xs font-mono mr-1 truncate" style={{ maxWidth: '120px' }}>
+    <div>
+      <label className="block text-sm font-medium mb-1">{label}</label>
+      <div className="flex mb-2">
+        <Input
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          placeholder={placeholder}
+          onKeyDown={handleKeyDown}
+          className="flex-1"
+        />
+        <Button
+          type="button"
+          onClick={handleAddToken}
+          className="ml-2"
+        >
+          <Plus size={16}/>
+        </Button>
+      </div>
+      {tokens.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {tokens.map((token, index) => (
+            <div key={index} className="flex items-center bg-gray-100 rounded-md px-2 py-1">
+              <span className="text-xs font-mono mr-1 truncate" style={{maxWidth: '120px'}}>
                 {token}
               </span>
-                    <button
-                        type="button"
-                        className="text-gray-500 hover:text-gray-700"
-                        onClick={() => handleRemoveToken(token)}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-              ))}
+              <button
+                type="button"
+                className="text-gray-500 hover:text-gray-700"
+                onClick={() => handleRemoveToken(token)}
+              >
+                <X size={14}/>
+              </button>
             </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -137,7 +137,7 @@ const FlowVisualization = () => {
   const [formErrors, setFormErrors] = useState({});
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [tooltip, setTooltip] = useState({ text: '', position: null });
+  const [tooltip, setTooltip] = useState({text: '', position: null});
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [wrappedTokens, setWrappedTokens] = useState([]);
   const [tokenInfo, setTokenInfo] = useState({});
@@ -148,6 +148,7 @@ const FlowVisualization = () => {
   const [maxCapacity, setMaxCapacity] = useState(0);
   const [boundMin, setBoundMin] = useState(0);
   const [boundMax, setBoundMax] = useState(0);
+  const [balancesByAccount, setBalancesByAccount] = useState({});
   const circlesData = useRef(new CirclesData(new CirclesRpc(API_ENDPOINT))).current;
   const circlesProfiles = useRef(new Profiles(API_ENDPOINT + "profiles/")).current;
 
@@ -162,7 +163,7 @@ const FlowVisualization = () => {
     const loadTokenInfos = async () => {
       // Collect unique tokenOwner addresses from transfers
       const tokenOwners = Array.from(
-          new Set(pathData.transfers.map(t => t.tokenOwner.toLowerCase()))
+        new Set(pathData.transfers.map(t => t.tokenOwner.toLowerCase()))
       );
 
       // Fetch token info rows via the SDK
@@ -175,10 +176,10 @@ const FlowVisualization = () => {
       ];
 
       const wrapped = infoRows
-          .filter(row => wrapperTypes.includes(row.type))
-          .map(row => row.token.toLowerCase());
+        .filter(row => wrapperTypes.includes(row.type))
+        .map(row => row.token.toLowerCase());
 
-      const tokenInfoMap = infoRows.reduce((p,c) => {
+      const tokenInfoMap = infoRows.reduce((p, c) => {
         p[c.token.toLowerCase()] = c;
         return p;
       }, {});
@@ -203,9 +204,9 @@ const FlowVisualization = () => {
     const expr = `mapData(flowValue,${minCapacity},${maxCapacity},${minPx},${maxPx})`;
 
     cy.style()
-        .selector('edge')
-        .style('width', expr)
-        .update();
+      .selector('edge')
+      .style('width', expr)
+      .update();
   }, [minCapacity, maxCapacity]);
 
   // fetch profiles of token owners in batches of 50. In the end setTokenOwnerProfiles.
@@ -221,7 +222,7 @@ const FlowVisualization = () => {
 
       const profilesMap = {};
       for (const batch of batches) {
-        const profiles = await circlesProfiles.searchByAddresses(batch, { fetchComplete: true });
+        const profiles = await circlesProfiles.searchByAddresses(batch, {fetchComplete: true});
         profiles.forEach(profile => {
           profilesMap[profile.address.toLowerCase()] = profile;
         });
@@ -237,19 +238,133 @@ const FlowVisualization = () => {
   useEffect(() => {
     if (!pathData) return;
     const addresses = Array.from(new Set(
-        pathData.transfers.flatMap(t => [t.from.toLowerCase(), t.to.toLowerCase()])
+      pathData.transfers.flatMap(t => [t.from.toLowerCase(), t.to.toLowerCase()])
     ));
     const loadNodeProfiles = async () => {
       const map = {};
       for (let i = 0; i < addresses.length; i += 50) {
         const batch = addresses.slice(i, i + 50);
-        const profiles = await circlesProfiles.searchByAddresses(batch, { fetchComplete: true });
-        profiles.forEach(p => { map[p.address.toLowerCase()] = p; });
+        const profiles = await circlesProfiles.searchByAddresses(batch, {fetchComplete: true});
+        profiles.forEach(p => {
+          map[p.address.toLowerCase()] = p;
+        });
       }
       setNodeProfiles(map);
     };
     loadNodeProfiles();
   }, [pathData, circlesProfiles]);
+
+  useEffect(() => {
+    if (!pathData) {
+      return;
+    }
+
+    const uniqueAddresses = Array.from(
+      new Set(
+        pathData.transfers.flatMap(t => [t.from.toLowerCase(), t.to.toLowerCase()])
+      )
+    );
+
+    const loadBalances = async () => {
+      const buildBatchFor = (batch) =>
+        batch.map((addr, idx) => ({
+          jsonrpc: '2.0',
+          id: idx,
+          method: 'circles_getTokenBalances',
+          params: [addr]
+        }));
+
+      const tmp = {};
+
+      for (let i = 0; i < uniqueAddresses.length; i += 50) {
+        const batch = uniqueAddresses.slice(i, i + 50);
+        const response = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(buildBatchFor(batch))
+        });
+
+        if (!response.ok) { /* ignore and continue */
+          continue;
+        }
+        const results = await response.json();                // RPC batch response
+        results.forEach((rpcResult) => {
+          const addr = batch[rpcResult.id].toLowerCase();
+          const balanceMap = {};
+
+          // rpcResult.result?.forEach((row) => {
+          //   const owner = row.tokenOwner.toLowerCase();
+          //   balanceMap[owner] = Number(row.circles);              // already in CRC units
+          // });
+
+          rpcResult.result?.forEach((row) => {
+            // use the TOKEN ADDRESS as the key – it always matches transfer.tokenOwner
+            const tokenKey = row.tokenAddress.toLowerCase();
+
+            // accumulate in case the same tokenAddress appears more than once
+            balanceMap[tokenKey] = (balanceMap[tokenKey] ?? 0) + Number(row.circles);
+          });
+
+          tmp[addr] = balanceMap;
+        });
+      }
+
+      console.log("Balances by account:", tmp);
+
+      setBalancesByAccount(tmp);
+    };
+
+    loadBalances().catch(console.error);
+  }, [pathData]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    const haveBalances = Object.keys(balancesByAccount).length > 0;
+
+    if (!cy || !haveBalances) {
+      return;
+    }
+
+    cy.batch(() => {
+      cy.edges().forEach(edge => {
+        const src = edge.data('source').toLowerCase();
+        const tokenAddr = edge.data('tokenOwner').toLowerCase();
+        const flow = edge.data('flowValue');               // CRC
+        const balance = balancesByAccount[src]?.[tokenAddr] ?? 0;
+
+        const ratio = balance > 0 ? Math.min(flow / balance, 1) : 0;  // clamp 0‥1
+        const exceedsCap = flow > balance;
+        const flagClass = 'over-capacity';
+
+        if (exceedsCap) {
+          edge.addClass(flagClass);
+          edge.removeClass('saturation');
+        } else {
+          edge.removeClass(flagClass);
+          edge.addClass('saturation');
+
+          const ratio = balance > 0 ? Math.min(flow / balance, 1) : 0;   // 0‥1
+
+// convert to 0‥100 before injecting
+          const pct = (ratio * 100).toFixed(2);                          // e.g. "33.94"
+
+          edge.style({
+            'line-gradient-stop-colors': '#16A34A #16A34A #94A3B8 #94A3B8',
+            'line-gradient-stop-positions': `0 ${pct} ${pct} 100`
+          });
+
+        }
+
+        edge.data(
+          'fullInfo',
+          `Flow: ${flow.toFixed(6)} CRC\n` +
+          `Source balance: ${balance.toFixed(6)} CRC\n` +
+          `Used: ${(ratio * 100).toFixed(2)} %`
+        );
+      });
+    });
+  }, [balancesByAccount]);
+
 
   // Set the min. and max. of the value filter slider
   useEffect(() => {
@@ -283,7 +398,7 @@ const FlowVisualization = () => {
 
   // Handle form input changes
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
+    const {name, value} = e.target;
 
     if (name === 'crcAmount') {
       // For amount field, store ETH value and calculate Wei
@@ -296,9 +411,9 @@ const FlowVisualization = () => {
     } else {
       // Map UI field names to the capitalized API parameter names
       const mappedFieldName = name === 'from' ? 'From' :
-          name === 'to' ? 'To' :
-              name === 'fromTokens' ? 'FromTokens' :
-                  name === 'toTokens' ? 'ToTokens' : name;
+        name === 'to' ? 'To' :
+          name === 'fromTokens' ? 'FromTokens' :
+            name === 'toTokens' ? 'ToTokens' : name;
 
       // For other fields, store value as is
       setFormData(prev => ({
@@ -427,9 +542,9 @@ const FlowVisualization = () => {
           const matchingEdges = cyRef.current.edges().filter(edge => {
             const data = edge.data();
             return (
-                data.originalFrom.toLowerCase() === fromAddr.toLowerCase() &&
-                data.originalTo.toLowerCase() === toAddr.toLowerCase() &&
-                data.originalTokenOwner.toLowerCase() === tokenOwner.toLowerCase()
+              data.originalFrom.toLowerCase() === fromAddr.toLowerCase() &&
+              data.originalTo.toLowerCase() === toAddr.toLowerCase() &&
+              data.originalTokenOwner.toLowerCase() === tokenOwner.toLowerCase()
             );
           });
 
@@ -461,7 +576,7 @@ const FlowVisualization = () => {
         cyRef.current.destroy();
       }
 
-      const all = pathData.transfers.map(t => Number(t.value)/1e18);
+      const all = pathData.transfers.map(t => Number(t.value) / 1e18);
       const dmin = Math.min(...all), dmax = Math.max(...all);
       const minPx = 1, maxPx = 10;
       const widthExpr = `mapData(flowValue,${dmin},${dmax},${minPx},${maxPx})`;
@@ -499,7 +614,7 @@ const FlowVisualization = () => {
         // Create a unique ID for each edge
         const edgeId = `${fromAddr}-${toAddr}-${transfer.tokenOwner.toLowerCase()}-${Math.random().toString(36).substring(2, 9)}`;
         const profile = tokenOwnerProfiles[transfer.tokenOwner.toLowerCase()];
-        const ownerLabel = profile?.name || `${transfer.tokenOwner.slice(0,6)}...${transfer.tokenOwner.slice(-4)}`;
+        const ownerLabel = profile?.name || `${transfer.tokenOwner.slice(0, 6)}...${transfer.tokenOwner.slice(-4)}`;
 
         elements.edges.push({
           data: {
@@ -540,10 +655,10 @@ const FlowVisualization = () => {
 
         let color;
         let profile = nodeProfiles[id];
-        let label = profile?.name ?? `${id.slice(0,6)}...${id.slice(-4)}`;
+        let label = profile?.name ?? `${id.slice(0, 6)}...${id.slice(-4)}`;
         let tooltipText = profile
-            ? `Name: ${profile.name}\nAddress: ${id}`
-            : `Address: ${id}`;
+          ? `Name: ${profile.name}\nAddress: ${id}`
+          : `Address: ${id}`;
 
         if (isSameSourceSink && isSource && isSink) {
           color = '#e0f63b';
@@ -599,10 +714,10 @@ const FlowVisualization = () => {
               'target-arrow-color': '#94A3B8',
               'target-arrow-shape': 'triangle',
               'curve-style': 'bezier',
-              'line-style': function(ele) {
+              'line-style': function (ele) {
                 return ele.data('isWrapped') ? 'dashed' : 'solid';
               },
-              'label': function(ele) {
+              'label': function (ele) {
                 return ele.data('edgeLabel') + " " + ele.data('percentage') + '%';
               },
               'text-rotation': 'autorotate',
@@ -610,6 +725,25 @@ const FlowVisualization = () => {
               'text-margin-y': '-10px',
               'text-outline-color': '#ffffff',
               'text-outline-width': 1
+            }
+          },
+          {
+            selector: 'edge.over-capacity',
+            style: {
+              'line-color': '#F97316',
+              'target-arrow-color': '#F97316',
+              'width': 4,
+              'line-style': 'dotted'   // visually distinct from wrapped dashed edges
+            }
+          },
+          {
+            selector: 'edge.saturation',
+            style: {
+              'line-fill': 'linear-gradient',
+
+              //      0%         pct         pct         100%
+              'line-gradient-stop-colors': '#16A34A #16A34A #94A3B8 #94A3B8',
+              'line-gradient-stop-positions': '0        0.0    0.0    1'  // overwritten per-edge
             }
           },
           {
@@ -643,7 +777,7 @@ const FlowVisualization = () => {
         const position = event.renderedPosition;
         setTooltip({
           text: `${node.data('tooltipText')}`,
-          position: { x: position.x, y: position.y }
+          position: {x: position.x, y: position.y}
         });
       });
 
@@ -652,12 +786,12 @@ const FlowVisualization = () => {
         const position = event.renderedPosition;
         setTooltip({
           text: edge.data('fullInfo'),
-          position: { x: position.x, y: position.y }
+          position: {x: position.x, y: position.y}
         });
       });
 
       cy.on('mouseout', () => {
-        setTooltip({ text: '', position: null });
+        setTooltip({text: '', position: null});
       });
 
       // Add click handler for edges
@@ -709,8 +843,8 @@ const FlowVisualization = () => {
         if (!node.empty()) {
           node.data('label', profile.name || node.data('label'));
           node.data(
-              'tooltipText',
-              `Name: ${profile.name}\nAddress: ${addr}`
+            'tooltipText',
+            `Name: ${profile.name}\nAddress: ${addr}`
           );
         }
       });
@@ -729,13 +863,13 @@ const FlowVisualization = () => {
         cy.edges(`[tokenOwner = "${ownerAddr}"]`).forEach(edge => {
           edge.data('edgeLabel', label);
           // rebuild the fullInfo tooltip cleanly
-          const flowValue   = edge.data('flowValue').toFixed(6);
-          const percentage  = edge.data('percentage');
+          const flowValue = edge.data('flowValue').toFixed(6);
+          const percentage = edge.data('percentage');
           edge.data(
-              'fullInfo',
-              `Flow: ${flowValue} tokens\n` +
-              `Percentage: ${percentage}%\n` +
-              `Owner: ${label}`
+            'fullInfo',
+            `Flow: ${flowValue} tokens\n` +
+            `Percentage: ${percentage}%\n` +
+            `Owner: ${label}`
           );
         });
       });
@@ -761,192 +895,196 @@ const FlowVisualization = () => {
   }, [minCapacity, maxCapacity]);
 
   return (
-      <div className="flex flex-col h-screen bg-gray-50">
-        <Header />
-        <div className="flex flex-col mt-16">
-          <div className="flex flex-1 min-h-[50vh]">
-            {/* Sidebar with collapsible functionality */}
-            <div
-                className={`
+    <div className="flex flex-col h-screen bg-gray-50">
+      <Header/>
+      <div className="flex flex-col mt-16">
+        <div className="flex flex-1 min-h-[50vh]">
+          {/* Sidebar with collapsible functionality */}
+          <div
+            className={`
               transform transition-all duration-300 ease-in-out
               bg-white shadow-lg relative
               ${isCollapsed ? 'w-12' : 'w-[32rem]'}
             `}
-                style={{
-                  minWidth: isCollapsed ? '3rem' : '32rem',
-                  maxWidth: isCollapsed ? '3rem' : '32rem'
-                }}
+            style={{
+              minWidth: isCollapsed ? '3rem' : '32rem',
+              maxWidth: isCollapsed ? '3rem' : '32rem'
+            }}
+          >
+            {/* Toggle button */}
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="absolute -right-3 top-1/2 -translate-y-1/2 bg-white shadow-lg p-2 rounded-full z-10"
             >
-              {/* Toggle button */}
-              <button
-                  onClick={() => setIsCollapsed(!isCollapsed)}
-                  className="absolute -right-3 top-1/2 -translate-y-1/2 bg-white shadow-lg p-2 rounded-full z-10"
-              >
-                {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-              </button>
+              {isCollapsed ? <ChevronRight size={16}/> : <ChevronLeft size={16}/>}
+            </button>
 
-              {/* Sidebar content - only shown when expanded */}
-              {!isCollapsed && (
-                  <div className="p-4 space-y-4">
-                    <Card>
-                      <CardContent className="space-y-4 pt-4">
-                        <div>
-                          <label className="block text-sm font-medium mb-1">From Address</label>
-                          <Input
-                              name="from"
-                              value={formData.From}
-                              onChange={handleInputChange}
-                              placeholder="0x..."
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium mb-1">To Address</label>
-                          <Input
-                              name="to"
-                              value={formData.To}
-                              onChange={handleInputChange}
-                              placeholder="0x..."
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium mb-1">Value (in CRC)</label>
-                          <Input
-                              name="crcAmount"
-                              value={formData.crcAmount}
-                              onChange={handleInputChange}
-                              placeholder="Enter amount in ETH..."
-                              type="text"
-                              inputMode="decimal"
-                          />
-                        </div>
+            {/* Sidebar content - only shown when expanded */}
+            {!isCollapsed && (
+              <div className="p-4 space-y-4">
+                <Card>
+                  <CardContent className="space-y-4 pt-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">From Address</label>
+                      <Input
+                        name="from"
+                        value={formData.From}
+                        onChange={handleInputChange}
+                        placeholder="0x..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">To Address</label>
+                      <Input
+                        name="to"
+                        value={formData.To}
+                        onChange={handleInputChange}
+                        placeholder="0x..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Value (in CRC)</label>
+                      <Input
+                        name="crcAmount"
+                        value={formData.crcAmount}
+                        onChange={handleInputChange}
+                        placeholder="Enter amount in ETH..."
+                        type="text"
+                        inputMode="decimal"
+                      />
+                    </div>
 
-                        {/* Token input components for multiple tokens */}
-                        <TokenInput
-                            value={formData.FromTokens}
-                            onChange={(value) => handleTokensChange('FromTokens', value)}
-                            placeholder="0x..."
-                            label="From Tokens (Optional, Add multiple)"
-                        />
+                    {/* Token input components for multiple tokens */}
+                    <TokenInput
+                      value={formData.FromTokens}
+                      onChange={(value) => handleTokensChange('FromTokens', value)}
+                      placeholder="0x..."
+                      label="From Tokens (Optional, Add multiple)"
+                    />
 
-                        <TokenInput
-                            value={formData.ToTokens}
-                            onChange={(value) => handleTokensChange('ToTokens', value)}
-                            placeholder="0x..."
-                            label="To Tokens (Optional, Add multiple)"
-                        />
+                    <TokenInput
+                      value={formData.ToTokens}
+                      onChange={(value) => handleTokensChange('ToTokens', value)}
+                      placeholder="0x..."
+                      label="To Tokens (Optional, Add multiple)"
+                    />
 
-                        <div>
-                          <ToggleSwitch
-                              isEnabled={formData.WithWrap}
-                              onToggle={handleWithWrapToggle}
-                              label="Include Wrapped Tokens"
-                          />
-                        </div>
-
-                        {pathData && (
-                            <div className="mb-4">
-                              <label className="block text-sm font-medium mb-1">
-                                Capacity range: {minCapacity.toFixed(3)} → {maxCapacity.toFixed(3)}
-                              </label>
-                              <SliderPrimitive.Root
-                                  className="relative flex items-center select-none touch-none w-full h-5"
-                                  min={boundMin}
-                                  max={boundMax}
-                                  step={1}
-                                  value={[minCapacity, maxCapacity]}
-                                  onValueChange={([newMin, newMax]) => {
-                                    setMinCapacity(newMin);
-                                    setMaxCapacity(newMax);
-                                  }}
-                                  aria-label="Edge capacity range"
-                              >
-                                <SliderPrimitive.Track className="bg-gray-200 relative flex-1 h-1 rounded-full">
-                                  <SliderPrimitive.Range className="absolute bg-blue-500 h-full rounded-full" />
-                                </SliderPrimitive.Track>
-                                <SliderPrimitive.Thumb className="block w-4 h-4 bg-white border-2 border-blue-500 rounded-full shadow" />
-                                <SliderPrimitive.Thumb className="block w-4 h-4 bg-white border-2 border-blue-500 rounded-full shadow" />
-                              </SliderPrimitive.Root>
-                            </div>
-                        )}
-
-                        <Button
-                            className="w-full"
-                            onClick={fetchPathData}
-                            disabled={isLoading}
-                        >
-                          {isLoading ? 'Finding Path...' : 'Find Path'}
-                        </Button>
-                      </CardContent>
-                    </Card>
+                    <div>
+                      <ToggleSwitch
+                        isEnabled={formData.WithWrap}
+                        onToggle={handleWithWrapToggle}
+                        label="Include Wrapped Tokens"
+                      />
+                    </div>
 
                     {pathData && (
-                        <>
-                          <Card>
-                            <CardContent className="pt-4">
-                              <p className="text-sm font-medium">Max Flow</p>
-                              <p className="text-lg">{(Number(pathData.maxFlow) / 1e18).toFixed(6)}</p>
-                            </CardContent>
-                          </Card>
-                        </>
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium mb-1">
+                          Capacity range: {minCapacity.toFixed(3)} → {maxCapacity.toFixed(3)}
+                        </label>
+                        <SliderPrimitive.Root
+                          className="relative flex items-center select-none touch-none w-full h-5"
+                          min={boundMin}
+                          max={boundMax}
+                          step={1}
+                          value={[minCapacity, maxCapacity]}
+                          onValueChange={([newMin, newMax]) => {
+                            setMinCapacity(newMin);
+                            setMaxCapacity(newMax);
+                          }}
+                          aria-label="Edge capacity range"
+                        >
+                          <SliderPrimitive.Track
+                            className="bg-gray-200 relative flex-1 h-1 rounded-full">
+                            <SliderPrimitive.Range
+                              className="absolute bg-blue-500 h-full rounded-full"/>
+                          </SliderPrimitive.Track>
+                          <SliderPrimitive.Thumb
+                            className="block w-4 h-4 bg-white border-2 border-blue-500 rounded-full shadow"/>
+                          <SliderPrimitive.Thumb
+                            className="block w-4 h-4 bg-white border-2 border-blue-500 rounded-full shadow"/>
+                        </SliderPrimitive.Root>
+                      </div>
                     )}
 
-                    {error && (
-                        <Card className="bg-red-50">
-                          <CardContent className="pt-4">
-                            <p className="text-red-600">{error}</p>
-                          </CardContent>
-                        </Card>
-                    )}
-                  </div>
-              )}
-            </div>
+                    <Button
+                      className="w-full"
+                      onClick={fetchPathData}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? 'Finding Path...' : 'Find Path'}
+                    </Button>
+                  </CardContent>
+                </Card>
 
-            {/* Main content area - remains the same */}
-            <div className={`
+                {pathData && (
+                  <>
+                    <Card>
+                      <CardContent className="pt-4">
+                        <p className="text-sm font-medium">Max Flow</p>
+                        <p className="text-lg">{(Number(pathData.maxFlow) / 1e18).toFixed(6)}</p>
+                      </CardContent>
+                    </Card>
+                  </>
+                )}
+
+                {error && (
+                  <Card className="bg-red-50">
+                    <CardContent className="pt-4">
+                      <p className="text-red-600">{error}</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Main content area - remains the same */}
+          <div className={`
             flex-1 bg-white relative
             transition-all duration-300 ease-in-out
             ${isCollapsed ? 'ml-12' : 'ml-0'}
           `}>
-              {pathData ? (
-                  <>
-                    <div
-                        ref={containerRef}
-                        className="w-full h-full"
-                    />
-                    <Tooltip {...tooltip} />
-                  </>
-              ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500">
-                    Enter addresses and click "Find Path" to visualize the flow
-                  </div>
-              )}
-            </div>
+            {pathData ? (
+              <>
+                <div
+                  ref={containerRef}
+                  className="w-full h-full"
+                />
+                <Tooltip {...tooltip} />
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                Enter addresses and click "Find Path" to visualize the flow
+              </div>
+            )}
           </div>
-
-          {/* Transaction Table Section */}
-          {pathData && (
-              <div className="p-4 bg-gray-50">
-                <h2 className="text-lg font-semibold mb-4">Transactions</h2>
-                <TransactionTable
-                    transfers={pathData.transfers}
-                    maxFlow={pathData.maxFlow}
-                    onTransactionSelect={handleTransactionSelect}
-                    selectedTransactionId={selectedTransactionId}
-                />
-              </div>
-          )}
-
-          {/* Flow Matrix Parameters Section */}
-          {pathData && (
-              <div className="p-4 bg-gray-50">
-                <FlowMatrixParams
-                    pathData={pathData}
-                    sender={formData.From}
-                />
-              </div>
-          )}
         </div>
+
+        {/* Transaction Table Section */}
+        {pathData && (
+          <div className="p-4 bg-gray-50">
+            <h2 className="text-lg font-semibold mb-4">Transactions</h2>
+            <TransactionTable
+              transfers={pathData.transfers}
+              maxFlow={pathData.maxFlow}
+              onTransactionSelect={handleTransactionSelect}
+              selectedTransactionId={selectedTransactionId}
+            />
+          </div>
+        )}
+
+        {/* Flow Matrix Parameters Section */}
+        {pathData && (
+          <div className="p-4 bg-gray-50">
+            <FlowMatrixParams
+              pathData={pathData}
+              sender={formData.From}
+            />
+          </div>
+        )}
       </div>
+    </div>
   );
 };
 
