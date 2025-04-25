@@ -1,142 +1,125 @@
-import React, { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import React, {useState} from 'react';
+import {ChevronDown, ChevronUp} from 'lucide-react';
 
-const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTransactionId }) => {
-  const [sortConfig, setSortConfig] = useState({
-    key: null,
-    direction: 'ascending'
-  });
+/**
+ * profiles: Record<addressLowercase, { name?: string; image?: string; avatar?: string }>
+ */
+const TransactionTable = ({
+                            transfers,
+                            maxFlow,
+                            onTransactionSelect,
+                            selectedTransactionId,
+                            profiles = {}
+                          }) => {
+  const [sortConfig, setSortConfig] = useState({key: null, direction: 'ascending'});
 
-  // Format value to show in scientific notation if very small
-  const formatValue = (value) => {
-    const num = Number(value) / 1e18;
-    if (num < 0.000001) {
-      return num.toExponential(6);
-    }
-    return num.toFixed(6);
+  // ──────────────────────────────────────────────────────────── helpers
+  const formatValue = (v) => {
+    const num = Number(v) / 1e18;
+    return num < 0.000001 ? num.toExponential(6) : num.toFixed(6);
   };
+  const fraction = (v) => ((Number(v) / Number(maxFlow)) * 100).toFixed(2) + '%';
 
-  // Calculate and format fraction as percentage
-  const calculateFraction = (value) => {
-    return ((Number(value) / Number(maxFlow)) * 100).toFixed(2) + '%';
-  };
-
-  // Sorting function
-  const sortTransfers = (transfers) => {
-    if (!sortConfig.key) return transfers;
-
-    return [...transfers].sort((a, b) => {
+  const sortTransfers = (arr) => {
+    if (!sortConfig.key) return arr;
+    return [...arr].sort((a, b) => {
       if (sortConfig.key === 'value' || sortConfig.key === 'fraction') {
-        const aValue = Number(sortConfig.key === 'value' ? a.value : (a.value / maxFlow));
-        const bValue = Number(sortConfig.key === 'value' ? b.value : (b.value / maxFlow));
-        return sortConfig.direction === 'ascending' ? aValue - bValue : bValue - aValue;
+        const av = Number(sortConfig.key === 'value' ? a.value : a.value / maxFlow);
+        const bv = Number(sortConfig.key === 'value' ? b.value : b.value / maxFlow);
+        return sortConfig.direction === 'ascending' ? av - bv : bv - av;
       }
-      
-      if (a[sortConfig.key] < b[sortConfig.key]) {
-        return sortConfig.direction === 'ascending' ? -1 : 1;
-      }
-      if (a[sortConfig.key] > b[sortConfig.key]) {
-        return sortConfig.direction === 'ascending' ? 1 : -1;
-      }
+      if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'ascending' ? -1 : 1;
+      if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'ascending' ? 1 : -1;
       return 0;
     });
   };
 
-  // Handle sorting
-  const requestSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
+  const requestSort = (key) =>
+    setSortConfig((cfg) => ({
+      key,
+      direction: cfg.key === key && cfg.direction === 'ascending' ? 'descending' : 'ascending'
+    }));
+
+  const sortIcon = (col) =>
+    sortConfig.key !== col ? (
+      <ChevronDown className="opacity-20" size={16}/>
+    ) : sortConfig.direction === 'ascending' ? (
+      <ChevronUp className="text-blue-500" size={16}/>
+    ) : (
+      <ChevronDown className="text-blue-500" size={16}/>
+    );
+
+  const rowId = (t) => `${t.from}-${t.to}-${t.tokenOwner}`;
+
+  // ───────────────────────────── render helpers
+  const PartyCell = ({addr}) => {
+    const p = profiles[addr.toLowerCase()] || {};
+    const img = p.previewImageUrl || null;
+    return (
+      <div className="flex items-center gap-2 min-w-0">
+        {img ? (
+          <img src={img} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0"/>
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-gray-200 flex-shrink-0"/>
+        )}
+        <div className="min-w-0">
+          <div className="text-[10px] text-gray-500 font-mono truncate max-w-[150px]">{addr}</div>
+          <div className="text-sm font-medium truncate max-w-[150px]">{p.name || '—'}</div>
+        </div>
+      </div>
+    );
   };
 
-  // Get sort direction icon
-  const getSortIcon = (columnKey) => {
-    if (sortConfig.key !== columnKey) {
-      return <ChevronDown className="opacity-20" size={16} />;
-    }
-    return sortConfig.direction === 'ascending' ? 
-      <ChevronUp className="text-blue-500" size={16} /> : 
-      <ChevronDown className="text-blue-500" size={16} />;
-  };
+  const data = sortTransfers(transfers);
 
-  // Generate unique ID for a transaction
-  const getTransactionId = (transfer) => `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`;
-
-  const sortedTransfers = sortTransfers(transfers);
-
+  // ──────────────────────────────────────────────────────────── JSX
   return (
     <div className="w-full overflow-x-auto shadow-sm rounded-lg border">
       <table className="w-full text-sm text-left">
         <thead className="bg-gray-50 text-gray-600">
-          <tr>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('from')}
-            >
-              <div className="flex items-center gap-1">
-                From {getSortIcon('from')}
-              </div>
-            </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('to')}
-            >
-              <div className="flex items-center gap-1">
-                To {getSortIcon('to')}
-              </div>
-            </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('tokenOwner')}
-            >
-              <div className="flex items-center gap-1">
-                Token {getSortIcon('tokenOwner')}
-              </div>
-            </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('value')}
-            >
-              <div className="flex items-center gap-1">
-                Value {getSortIcon('value')}
-              </div>
-            </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('fraction')}
-            >
-              <div className="flex items-center gap-1">
-                Fraction {getSortIcon('fraction')}
-              </div>
-            </th>
-          </tr>
+        <tr>
+          <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('from')}>
+            <div className="flex items-center gap-1">From {sortIcon('from')}</div>
+          </th>
+          <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('to')}>
+            <div className="flex items-center gap-1">To {sortIcon('to')}</div>
+          </th>
+          <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('tokenOwner')}>
+            <div className="flex items-center gap-1">Token {sortIcon('tokenOwner')}</div>
+          </th>
+          <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('value')}>
+            <div className="flex items-center gap-1">Value {sortIcon('value')}</div>
+          </th>
+          <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('fraction')}>
+            <div className="flex items-center gap-1">Fraction {sortIcon('fraction')}</div>
+          </th>
+        </tr>
         </thead>
+
         <tbody className="bg-white divide-y divide-gray-200">
-          {sortedTransfers.map((transfer) => {
-            const transactionId = getTransactionId(transfer);
-            return (
-              <tr 
-                key={transactionId}
-                className={`
-                  hover:bg-gray-50 cursor-pointer
-                  ${selectedTransactionId === transactionId ? 'bg-blue-50' : ''}
-                `}
-                onClick={() => onTransactionSelect(transactionId)}
-              >
-                <td className="px-6 py-4 font-mono text-xs break-all">{transfer.from}</td>
-                <td className="px-6 py-4 font-mono text-xs break-all">{transfer.to}</td>
-                <td className="px-6 py-4 font-mono text-xs break-all">{transfer.tokenOwner}</td>
-                <td className="px-6 py-4">{formatValue(transfer.value)}</td>
-                <td className="px-6 py-4">{calculateFraction(transfer.value)}</td>
-              </tr>
-            );
-          })}
+        {data.map((t) => {
+          const id = rowId(t);
+          return (
+            <tr
+              key={id}
+              onClick={() => onTransactionSelect(id)}
+              className={`hover:bg-gray-50 cursor-pointer ${
+                selectedTransactionId === id ? 'bg-blue-50' : ''
+              }`}
+            >
+              <td className="px-4 py-3"><PartyCell addr={t.from}/></td>
+              <td className="px-4 py-3"><PartyCell addr={t.to}/></td>
+              <td className="px-4 py-3"><PartyCell addr={t.tokenOwner}/></td>
+              <td className="px-4 py-3">{formatValue(t.value)}</td>
+              <td className="px-4 py-3">{fraction(t.value)}</td>
+            </tr>
+          );
+        })}
         </tbody>
       </table>
     </div>
   );
 };
 
-export default TransactionTable;
+export default React.memo(TransactionTable);
+

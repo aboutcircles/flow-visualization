@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useMemo, useEffect, useRef} from 'react';
 import cytoscape from 'cytoscape';
 import klay from 'cytoscape-klay';
 import {Card, CardContent} from '@/components/ui/card';
@@ -28,29 +28,6 @@ const parseAddressList = (addressString) => {
     .split(/[\s,]+/)
     .map(addr => addr.trim())
     .filter(addr => addr && addr.startsWith('0x'));
-};
-
-// Tooltip component with improved formatting
-const Tooltip = ({text, position}) => {
-  if (!position) return null;
-
-  // Split the text by newlines and create separate lines
-  const lines = text.split('\n');
-
-  return (
-    <div
-      className="absolute z-50 bg-black/75 text-white p-2 rounded text-sm"
-      style={{
-        left: position.x + 10,
-        top: position.y + 10,
-        maxWidth: '400px'
-      }}
-    >
-      {lines.map((line, index) => (
-        <div key={index} className="whitespace-pre-wrap">{line}</div>
-      ))}
-    </div>
-  );
 };
 
 // TokenInput component for handling multiple token inputs
@@ -137,7 +114,7 @@ const FlowVisualization = () => {
   const [formErrors, setFormErrors] = useState({});
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [tooltip, setTooltip] = useState({text: '', position: null});
+  const tooltipRef = useRef(null);
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [wrappedTokens, setWrappedTokens] = useState([]);
   const [tokenInfo, setTokenInfo] = useState({});
@@ -155,6 +132,29 @@ const FlowVisualization = () => {
   // References for Cytoscape
   const cyRef = useRef(null);
   const containerRef = useRef(null);
+
+  const showTooltip = (html, {x, y}) => {
+    const el = tooltipRef.current;
+    const container = containerRef.current;
+    if (!el || !container) return;
+
+    // translate container-relative → viewport-relative
+    const {left, top} = container.getBoundingClientRect();
+    let pageX = left + x + 10;   // the "+10" keeps a little gap to the cursor
+    let pageY = top + y + 10;
+
+    // keep the tooltip fully on-screen
+    const W = el.offsetWidth || 200;   //  fallback width before first show
+    const H = el.offsetHeight || 100;
+    if (pageX + W > window.innerWidth) pageX = Math.max(4, pageX - W - 20);
+    if (pageY + H > window.innerHeight) pageY = Math.max(4, pageY - H - 20);
+
+    el.style.left = `${pageX}px`;
+    el.style.top = `${pageY}px`;
+    el.innerHTML = html.replace(/\n/g, '<br/>');
+    el.classList.remove('hidden');
+  };
+  const hideTooltip = () => tooltipRef.current?.classList.add('hidden');
 
   // Once we have pathData, fetch info for each tokenOwner in the path
   useEffect(() => {
@@ -794,25 +794,15 @@ const FlowVisualization = () => {
 
       // Add event listeners for tooltips
       cy.on('mouseover', 'node', (event) => {
-        const node = event.target;
-        const position = event.renderedPosition;
-        setTooltip({
-          text: `${node.data('tooltipText')}`,
-          position: {x: position.x, y: position.y}
-        });
+        showTooltip(event.target.data('tooltipText'), event.renderedPosition)
       });
 
       cy.on('mouseover', 'edge', (event) => {
-        const edge = event.target;
-        const position = event.renderedPosition;
-        setTooltip({
-          text: edge.data('fullInfo'),
-          position: {x: position.x, y: position.y}
-        });
+        showTooltip(event.target.data('fullInfo'), event.renderedPosition)
       });
 
       cy.on('mouseout', () => {
-        setTooltip({text: '', position: null});
+        hideTooltip();
       });
 
       // Add click handler for edges
@@ -910,6 +900,11 @@ const FlowVisualization = () => {
       });
     });
   }, [minCapacity, maxCapacity]);
+
+  const mergedProfiles = useMemo(
+    () => ({...nodeProfiles, ...tokenOwnerProfiles}),
+    [nodeProfiles, tokenOwnerProfiles]
+  );
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -1068,7 +1063,12 @@ const FlowVisualization = () => {
                   ref={containerRef}
                   className="w-full h-full"
                 />
-                <Tooltip {...tooltip} />
+                <div
+                  ref={tooltipRef}
+                  className="fixed z-50 pointer-events-none hidden
+                             rounded bg-black/75 text-white text-xs p-2"
+                  style={{maxWidth: '400px'}}
+                />
               </>
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
@@ -1087,6 +1087,7 @@ const FlowVisualization = () => {
               maxFlow={pathData.maxFlow}
               onTransactionSelect={handleTransactionSelect}
               selectedTransactionId={selectedTransactionId}
+              profiles={mergedProfiles}
             />
           </div>
         )}
