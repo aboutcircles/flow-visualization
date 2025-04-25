@@ -17,7 +17,7 @@ import * as SliderPrimitive from '@radix-ui/react-slider';
 cytoscape.use(klay);
 
 // Define the API endpoint as a constant for easy updating
-const API_ENDPOINT =  'https://rpc.aboutcircles.com/'
+const API_ENDPOINT =   'https://rpc.aboutcircles.com/'
 
 // Helper function to parse string of addresses into an array
 const parseAddressList = (addressString) => {
@@ -54,7 +54,7 @@ const Tooltip = ({ text, position }) => {
 };
 
 // TokenInput component for handling multiple token inputs
-const TokenInput = ({ value, onChange, placeholder, label }) => {
+const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusionToggle }) => {
   const [inputValue, setInputValue] = useState('');
 
   // Parse the current value string into an array of tokens
@@ -82,43 +82,50 @@ const TokenInput = ({ value, onChange, placeholder, label }) => {
   };
 
   return (
-      <div>
-        <label className="block text-sm font-medium mb-1">{label}</label>
-        <div className="flex mb-2">
-          <Input
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder={placeholder}
-              onKeyDown={handleKeyDown}
-              className="flex-1"
-          />
-          <Button
-              type="button"
-              onClick={handleAddToken}
-              className="ml-2"
-          >
-            <Plus size={16} />
-          </Button>
-        </div>
-        {tokens.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {tokens.map((token, index) => (
-                  <div key={index} className="flex items-center bg-gray-100 rounded-md px-2 py-1">
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="block text-sm font-medium">{label}</label>
+        <ToggleSwitch
+          isEnabled={isExcluded}
+          onToggle={onExclusionToggle}
+          label={isExcluded ? "Exclude Tokens" : "Include Tokens"}
+        />
+      </div>
+      <div className="flex mb-2">
+        <Input
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          placeholder={placeholder}
+          onKeyDown={handleKeyDown}
+          className="flex-1"
+        />
+        <Button
+          type="button"
+          onClick={handleAddToken}
+          className="ml-2"
+        >
+          <Plus size={16} />
+        </Button>
+      </div>
+      {tokens.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {tokens.map((token, index) => (
+            <div key={index} className={`flex items-center rounded-md px-2 py-1 ${isExcluded ? 'bg-red-100' : 'bg-gray-100'}`}>
               <span className="text-xs font-mono mr-1 truncate" style={{ maxWidth: '120px' }}>
                 {token}
               </span>
-                    <button
-                        type="button"
-                        className="text-gray-500 hover:text-gray-700"
-                        onClick={() => handleRemoveToken(token)}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-              ))}
+              <button
+                type="button"
+                className="text-gray-500 hover:text-gray-700"
+                onClick={() => handleRemoveToken(token)}
+              >
+                <X size={14} />
+              </button>
             </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -130,9 +137,13 @@ const FlowVisualization = () => {
     To: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
     FromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
     ToTokens: '',
+    ExcludedFromTokens: '',
+    ExcludedToTokens: '',
     crcAmount: '1000',  // Amount in ETH (for UI display)
     Amount: '1000000000000000000000', // Amount in Wei (will be calculated from crcAmount)
-    WithWrap: true // New flag for API endpoint
+    WithWrap: true, // Flag for including wrapped tokens
+    IsFromTokensExcluded: false, // New flag to determine if FromTokens are to be excluded
+    IsToTokensExcluded: false, // New flag to determine if ToTokens are to be excluded
   });
   const [formErrors, setFormErrors] = useState({});
   const [error, setError] = useState(null);
@@ -315,12 +326,70 @@ const FlowVisualization = () => {
     }
   };
 
-  // Handle token list changes
+  // Handle from tokens exclusion toggle
+  const handleFromTokensExclusionToggle = () => {
+    setFormData(prev => {
+      // If changing from include to exclude, move tokens from FromTokens to ExcludedFromTokens
+      if (!prev.IsFromTokensExcluded) {
+        return {
+          ...prev,
+          ExcludedFromTokens: prev.FromTokens,
+          FromTokens: '',
+          IsFromTokensExcluded: true
+        };
+      } else {
+        // Otherwise, move tokens from ExcludedFromTokens to FromTokens
+        return {
+          ...prev,
+          FromTokens: prev.ExcludedFromTokens,
+          ExcludedFromTokens: '',
+          IsFromTokensExcluded: false
+        };
+      }
+    });
+  };
+
+  // Handle to tokens exclusion toggle
+  const handleToTokensExclusionToggle = () => {
+    setFormData(prev => {
+      // If changing from include to exclude, move tokens from ToTokens to ExcludedToTokens
+      if (!prev.IsToTokensExcluded) {
+        return {
+          ...prev,
+          ExcludedToTokens: prev.ToTokens,
+          ToTokens: '',
+          IsToTokensExcluded: true
+        };
+      } else {
+        // Otherwise, move tokens from ExcludedToTokens to ToTokens
+        return {
+          ...prev,
+          ToTokens: prev.ExcludedToTokens,
+          ExcludedToTokens: '',
+          IsToTokensExcluded: false
+        };
+      }
+    });
+  };
+
+  // Updated token input change handler to work with either included or excluded tokens
   const handleTokensChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    if (field === 'FromTokens') {
+      setFormData(prev => ({
+        ...prev,
+        [prev.IsFromTokensExcluded ? 'ExcludedFromTokens' : 'FromTokens']: value
+      }));
+    } else if (field === 'ToTokens') {
+      setFormData(prev => ({
+        ...prev,
+        [prev.IsToTokensExcluded ? 'ExcludedToTokens' : 'ToTokens']: value
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [field]: value
+      }));
+    }
   };
 
   // Handle toggle change for WithWrap option
@@ -335,31 +404,42 @@ const FlowVisualization = () => {
   const fetchPathData = async () => {
     setIsLoading(true);
     setError(null);
-
+  
     try {
       // Parse token strings into arrays
       const fromTokensArray = parseAddressList(formData.FromTokens);
       const toTokensArray = parseAddressList(formData.ToTokens);
-
+      const excludedFromTokensArray = parseAddressList(formData.ExcludedFromTokens);
+      const excludedToTokensArray = parseAddressList(formData.ExcludedToTokens);
+  
       // Create the params object for the JSON-RPC request
       const params = {
         Source: formData.From,
         Sink: formData.To,
         TargetFlow: formData.Amount,
       };
-
+  
       // Only add optional parameters if they have values
       if (fromTokensArray.length > 0) {
         params.FromTokens = fromTokensArray;
       }
-
+  
       if (toTokensArray.length > 0) {
         params.ToTokens = toTokensArray;
       }
-
+  
+      // Add excluded tokens if present
+      if (excludedFromTokensArray.length > 0) {
+        params.ExcludedFromTokens = excludedFromTokensArray;
+      }
+  
+      if (excludedToTokensArray.length > 0) {
+        params.ExcludedToTokens = excludedToTokensArray;
+      }
+  
       // WithWrap is a boolean, so always include it
       params.WithWrap = formData.WithWrap;
-
+  
       // Construct the JSON-RPC request
       const requestBody = {
         jsonrpc: "2.0",
@@ -367,9 +447,9 @@ const FlowVisualization = () => {
         method: "circlesV2_findPath",
         params: [params]
       };
-
+  
       console.log('Sending JSON-RPC request:', requestBody);
-
+  
       const response = await fetch(API_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -377,18 +457,18 @@ const FlowVisualization = () => {
         },
         body: JSON.stringify(requestBody)
       });
-
+  
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`API error: ${response.status} ${response.statusText}\n${errorText}`);
       }
-
+  
       const responseData = await response.json();
-
+  
       if (responseData.error) {
         throw new Error(`JSON-RPC error: ${responseData.error.message || JSON.stringify(responseData.error)}`);
       }
-
+  
       // Extract the result data
       const data = responseData.result;
       setPathData(data);
@@ -400,6 +480,7 @@ const FlowVisualization = () => {
       setIsLoading(false);
     }
   };
+  
 
   const handleTransactionSelect = (transactionId) => {
     setSelectedTransactionId(transactionId);
@@ -822,17 +903,21 @@ const FlowVisualization = () => {
 
                         {/* Token input components for multiple tokens */}
                         <TokenInput
-                            value={formData.FromTokens}
-                            onChange={(value) => handleTokensChange('FromTokens', value)}
-                            placeholder="0x..."
-                            label="From Tokens (Optional, Add multiple)"
+                          value={formData.IsFromTokensExcluded ? formData.ExcludedFromTokens : formData.FromTokens}
+                          onChange={(value) => handleTokensChange('FromTokens', value)}
+                          placeholder="0x..."
+                          label="From Tokens (Add multiple)"
+                          isExcluded={formData.IsFromTokensExcluded}
+                          onExclusionToggle={handleFromTokensExclusionToggle}
                         />
 
                         <TokenInput
-                            value={formData.ToTokens}
-                            onChange={(value) => handleTokensChange('ToTokens', value)}
-                            placeholder="0x..."
-                            label="To Tokens (Optional, Add multiple)"
+                          value={formData.IsToTokensExcluded ? formData.ExcludedToTokens : formData.ToTokens}
+                          onChange={(value) => handleTokensChange('ToTokens', value)}
+                          placeholder="0x..."
+                          label="To Tokens (Add multiple)"
+                          isExcluded={formData.IsToTokensExcluded}
+                          onExclusionToggle={handleToTokensExclusionToggle}
                         />
 
                         <div>
