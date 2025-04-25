@@ -259,112 +259,126 @@ const FlowVisualization = () => {
       return;
     }
 
-    const uniqueAddresses = Array.from(
-      new Set(
-        pathData.transfers.flatMap(t => [t.from.toLowerCase(), t.to.toLowerCase()])
-      )
+    const addrSet = new Set(
+      pathData.transfers.flatMap(t => [t.from.toLowerCase(), t.to.toLowerCase()])
     );
+    const unique = Array.from(addrSet);
 
-    const loadBalances = async () => {
-      const buildBatchFor = (batch) =>
-        batch.map((addr, idx) => ({
-          jsonrpc: '2.0',
-          id: idx,
-          method: 'circles_getTokenBalances',
-          params: [addr]
-        }));
+    const buildBatch = (batch) => batch.map((addr, idx) => ({
+      jsonrpc: '2.0',
+      id: idx,
+      method: 'circles_getTokenBalances',
+      params: [addr]
+    }));
 
+    (async () => {
       const tmp = {};
 
-      for (let i = 0; i < uniqueAddresses.length; i += 50) {
-        const batch = uniqueAddresses.slice(i, i + 50);
-        const response = await fetch(API_ENDPOINT, {
+      for (let i = 0; i < unique.length; i += 50) {
+        const slice = unique.slice(i, i + 50);
+        const res = await fetch(API_ENDPOINT, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(buildBatchFor(batch))
+          body: JSON.stringify(buildBatch(slice))
         });
-
-        if (!response.ok) { /* ignore and continue */
+        if (!res.ok) {
           continue;
         }
-        const results = await response.json();                // RPC batch response
-        results.forEach((rpcResult) => {
-          const addr = batch[rpcResult.id].toLowerCase();
-          const balanceMap = {};
 
-          // rpcResult.result?.forEach((row) => {
-          //   const owner = row.tokenOwner.toLowerCase();
-          //   balanceMap[owner] = Number(row.circles);              // already in CRC units
-          // });
+        const rpcArray = await res.json();
+        rpcArray.forEach((rpc) => {
+          const account = slice[rpc.id].toLowerCase();
+          const map = {};
 
-          rpcResult.result?.forEach((row) => {
-            // use the TOKEN ADDRESS as the key – it always matches transfer.tokenOwner
+          rpc.result?.forEach((row) => {
             const tokenKey = row.tokenAddress.toLowerCase();
-
-            // accumulate in case the same tokenAddress appears more than once
-            balanceMap[tokenKey] = (balanceMap[tokenKey] ?? 0) + Number(row.circles);
+            map[tokenKey] = {
+              crc: Number(row.circles),
+              atto: BigInt(row.attoCircles ?? row.attoCrc ?? '0')
+            };
           });
 
-          tmp[addr] = balanceMap;
+          tmp[account] = map;
         });
       }
 
-      console.log("Balances by account:", tmp);
-
       setBalancesByAccount(tmp);
-    };
-
-    loadBalances().catch(console.error);
+    })().catch(console.error);
   }, [pathData]);
 
   useEffect(() => {
     const cy = cyRef.current;
-    const haveBalances = Object.keys(balancesByAccount).length > 0;
-
-    if (!cy || !haveBalances) {
+    if (!cy || !Object.keys(balancesByAccount).length) {
       return;
     }
 
     cy.batch(() => {
-      cy.edges().forEach(edge => {
-        const src = edge.data('source').toLowerCase();
-        const tokenAddr = edge.data('tokenOwner').toLowerCase();
-        const flow = edge.data('flowValue');               // CRC
-        const balance = balancesByAccount[src]?.[tokenAddr] ?? 0;
+      cy.nodes().forEach(node => {
+        const addr = node.id().toLowerCase();
+        const balMap = balancesByAccount[addr] ?? {};
+        const totalCrc = Object.values(balMap)
+          .reduce((sum, e) => sum + e.crc, 0);
 
-        const ratio = balance > 0 ? Math.min(flow / balance, 1) : 0;  // clamp 0‥1
-        const exceedsCap = flow > balance;
-        const flagClass = 'over-capacity';
-
-        if (exceedsCap) {
-          edge.addClass(flagClass);
-          edge.removeClass('saturation');
-        } else {
-          edge.removeClass(flagClass);
-          edge.addClass('saturation');
-
-          const ratio = balance > 0 ? Math.min(flow / balance, 1) : 0;   // 0‥1
-
-// convert to 0‥100 before injecting
-          const pct = (ratio * 100).toFixed(2);                          // e.g. "33.94"
-
-          edge.style({
-            'line-gradient-stop-colors': '#16A34A #16A34A #94A3B8 #94A3B8',
-            'line-gradient-stop-positions': `0 ${pct} ${pct} 100`
-          });
-
-        }
-
-        edge.data(
-          'fullInfo',
-          `Flow: ${flow.toFixed(6)} CRC\n` +
-          `Source balance: ${balance.toFixed(6)} CRC\n` +
-          `Used: ${(ratio * 100).toFixed(2)} %`
+        // build a fresh tooltip, keep name / address if already present
+        const base = node.data('label')
+          ? `Name: ${node.data('label')}\n`
+          : '';
+        node.data(
+          'tooltipText',
+          `${base}Address: ${addr}\n` +
+          `Total balance: ${totalCrc.toFixed(6)} CRC`
         );
       });
     });
   }, [balancesByAccount]);
 
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !Object.keys(balancesByAccount).length) {
+      return;
+    }
+
+    cy.batch(() => {
+      cy.edges().forEach(edge => {
+        const srcAddr = edge.data('source').toLowerCase();
+        const tokenAddr = edge.data('tokenOwner').toLowerCase();
+
+        const balEntry = balancesByAccount[srcAddr]?.[tokenAddr];
+        const balAtto = balEntry ? balEntry.atto : 0n;
+        const balCrc = balEntry ? balEntry.crc : 0;
+
+        const flowAtto = BigInt(edge.data('flowAtto'));
+        const flowCrcDec = Number(edge.data('flowValue'));
+
+        const exceedsCap = flowAtto > balAtto;
+        const ratio = balAtto > 0n
+          ? Math.min(Number(flowAtto) / Number(balAtto), 1)
+          : 0;
+
+        if (exceedsCap) {
+          edge.addClass('over-capacity');
+          edge.removeClass('saturation');
+        } else {
+          edge.removeClass('over-capacity');
+          edge.addClass('saturation');
+
+          const pct = (ratio * 100).toFixed(2);            // 0-100 %
+          edge.style({
+            'line-gradient-stop-colors': '#16A34A #16A34A #94A3B8 #94A3B8',
+            'line-gradient-stop-positions': `0 ${pct} ${pct} 100`
+          });
+        }
+
+        edge.data(
+          'fullInfo',
+          `Flow: ${flowCrcDec.toFixed(6)} CRC\n` +
+          `Token address: ${tokenAddr}\n` +
+          `Source balance: ${balCrc.toFixed(6)} CRC\n` +
+          `Used: ${(ratio * 100).toFixed(2)} %`
+        );
+      });
+    });
+  }, [balancesByAccount]);
 
   // Set the min. and max. of the value filter slider
   useEffect(() => {
@@ -609,6 +623,7 @@ const FlowVisualization = () => {
 
         const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
         const flowValue = Number(transfer.value) / 1e18;
+        const flowAtto = BigInt(transfer.value);
         const isWrappedToken = wrappedTokens.includes(transfer.tokenOwner.toLowerCase());
 
         // Create a unique ID for each edge
@@ -623,15 +638,21 @@ const FlowVisualization = () => {
             target: toAddr,
             weight: Math.max(1, flowPercentage / 10),
             flowValue: flowValue,
+            flowAtto: flowAtto.toString(),
             percentage: flowPercentage.toFixed(2),
             edgeLabel: ownerLabel,
             tokenOwner: transfer.tokenOwner.toLowerCase(),
             isWrapped: isWrappedToken,
-            // Track the original transfer for table selection
+
             originalFrom: transfer.from,
             originalTo: transfer.to,
             originalTokenOwner: transfer.tokenOwner,
-            fullInfo: `Flow: ${flowValue.toFixed(6)} tokens\nPercentage: ${flowPercentage.toFixed(2)}%\nToken (${isWrappedToken ? 'CRC20' : 'ERC1155'}): ${transfer.tokenOwner}\n${ownerLabel}`
+
+            fullInfo:
+              `Flow: ${flowValue.toFixed(6)} CRC\n` +
+              `Token address: ${transfer.tokenOwner}\n` +
+              `Percentage: ${flowPercentage.toFixed(2)} %\n` +
+              `Owner: ${ownerLabel}`
           }
         });
       });
