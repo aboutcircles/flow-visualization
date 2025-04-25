@@ -827,19 +827,15 @@ const FlowVisualization = () => {
       cyRef.current = cy;
 
       // Run layout again after a short delay to ensure proper positioning
-      setTimeout(() => {
-        if (cyRef.current) {
-          cyRef.current.layout({
-            name: 'klay',
-            nodeDimensionsIncludeLabels: true,
-            klay: {
-              direction: 'RIGHT',
-              spacing: 50,
-              thoroughness: 10
-            }
-          }).run();
+      cyRef.current.layout({
+        name: 'klay',
+        nodeDimensionsIncludeLabels: true,
+        klay: {
+          direction: 'RIGHT',
+          spacing: 50,
+          thoroughness: 10
         }
-      }, 100);
+      }).run();
 
     } catch (error) {
       console.error('Error initializing Cytoscape:', error);
