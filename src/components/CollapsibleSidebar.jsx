@@ -10,6 +10,8 @@ const CollapsibleSidebar = ({
   handleInputChange,
   handleTokensChange,
   handleWithWrapToggle,
+  handleFromTokensExclusionToggle,
+  handleToTokensExclusionToggle,
   onFindPath,
   isLoading,
   error,
@@ -49,6 +51,8 @@ const CollapsibleSidebar = ({
             handleInputChange={handleInputChange}
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
+            handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
+            handleToTokensExclusionToggle={handleToTokensExclusionToggle}
             onFindPath={onFindPath}
             isLoading={isLoading}
             pathData={pathData}

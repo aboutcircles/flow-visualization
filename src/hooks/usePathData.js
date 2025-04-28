@@ -61,7 +61,7 @@ export const usePathData = () => {
 
     const loadProfiles = async () => {
       const profiles = await fetchProfiles(circlesProfiles, addresses);
-      setTokenOwnerProfiles(profiles);
+      setTokenOwnerProfiles(prev => ({...prev, ...profiles}));
     };
 
     loadProfiles();
@@ -77,7 +77,7 @@ export const usePathData = () => {
     
     const loadNodeProfiles = async () => {
       const profiles = await fetchProfiles(circlesProfiles, addresses);
-      setNodeProfiles(profiles);
+      setNodeProfiles(prev => ({...prev, ...profiles}));
     };
     
     loadNodeProfiles();

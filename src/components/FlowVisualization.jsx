@@ -19,7 +19,9 @@ const FlowVisualization = () => {
     formData, 
     handleInputChange, 
     handleTokensChange, 
-    handleWithWrapToggle 
+    handleWithWrapToggle,
+    handleFromTokensExclusionToggle,
+    handleToTokensExclusionToggle
   } = useFormData();
   
   // Path data and related state
@@ -66,6 +68,8 @@ const FlowVisualization = () => {
             handleInputChange={handleInputChange}
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
+            handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
+            handleToTokensExclusionToggle={handleToTokensExclusionToggle}
             onFindPath={handleFindPath}
             isLoading={isLoading}
             error={error}

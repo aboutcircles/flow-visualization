@@ -51,6 +51,8 @@ export const findPath = async (formData) => {
     // Parse token strings into arrays
     const fromTokensArray = parseAddressList(formData.FromTokens);
     const toTokensArray = parseAddressList(formData.ToTokens);
+    const excludedFromTokensArray = parseAddressList(formData.ExcludedFromTokens);
+    const excludedToTokensArray = parseAddressList(formData.ExcludedToTokens);
 
     // Create the params object for the JSON-RPC request
     const params = {
@@ -66,6 +68,15 @@ export const findPath = async (formData) => {
 
     if (toTokensArray.length > 0) {
       params.ToTokens = toTokensArray;
+    }
+
+    // Add excluded tokens if present
+    if (excludedFromTokensArray.length > 0) {
+      params.ExcludedFromTokens = excludedFromTokensArray;
+    }
+
+    if (excludedToTokensArray.length > 0) {
+      params.ExcludedToTokens = excludedToTokensArray;
     }
 
     // WithWrap is a boolean, so always include it

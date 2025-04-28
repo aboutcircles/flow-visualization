@@ -11,6 +11,8 @@ const PathFinderForm = ({
   handleInputChange,
   handleTokensChange,
   handleWithWrapToggle,
+  handleFromTokensExclusionToggle,
+  handleToTokensExclusionToggle,
   onFindPath,
   isLoading,
   pathData,
@@ -56,17 +58,21 @@ const PathFinderForm = ({
 
         {/* Token input components for multiple tokens */}
         <TokenInput
-          value={formData.FromTokens}
+          value={formData.IsFromTokensExcluded ? formData.ExcludedFromTokens : formData.FromTokens}
           onChange={(value) => handleTokensChange('FromTokens', value)}
           placeholder="0x..."
-          label="From Tokens (Optional, Add multiple)"
+          label="From Tokens (Add multiple)"
+          isExcluded={formData.IsFromTokensExcluded}
+          onExclusionToggle={handleFromTokensExclusionToggle}
         />
 
         <TokenInput
-          value={formData.ToTokens}
+          value={formData.IsToTokensExcluded ? formData.ExcludedToTokens : formData.ToTokens}
           onChange={(value) => handleTokensChange('ToTokens', value)}
           placeholder="0x..."
-          label="To Tokens (Optional, Add multiple)"
+          label="To Tokens (Add multiple)"
+          isExcluded={formData.IsToTokensExcluded}
+          onExclusionToggle={handleToTokensExclusionToggle}
         />
 
         <div>

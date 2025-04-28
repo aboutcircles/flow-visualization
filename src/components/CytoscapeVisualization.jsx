@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useCytoscape } from '@/hooks/useCytoscape';
 import Tooltip from '@/components/ui/tooltip';
 
@@ -30,7 +30,7 @@ const CytoscapeVisualization = ({
   });
   
   // When selectedTransactionId changes from parent, highlight it in the graph
-  React.useEffect(() => {
+  useEffect(() => {
     if (selectedTransactionId) {
       highlightTransaction(selectedTransactionId);
     }
