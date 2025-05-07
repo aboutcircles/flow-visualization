@@ -36,15 +36,25 @@ export const useCytoscape = ({
       };
 
       // Process transfers to create nodes and edges
-      const sourceAddress = pathData.transfers[0]?.from.toLowerCase();
-      const sinkAddress = pathData.transfers[pathData.transfers.length - 1]?.to.toLowerCase();
+      // find source/sink by degree rather than array position
+      const fromSet = new Set(pathData.transfers.map(t => t.from.toLowerCase()));
+      const toSet   = new Set(pathData.transfers.map(t => t.to.toLowerCase()));
+
+      const sinkAddress   = [...toSet].find(addr => !fromSet.has(addr));         // receives only
+      const sourceAddress = [...fromSet].find(addr => !toSet.has(addr));         // sends only
+
+      // fallback (very unlikely) – if everything both sends & receives we keep the old guess
+      const fallbackSrc  = pathData.transfers[0]?.from.toLowerCase();
+      const fallbackSink = pathData.transfers[pathData.transfers.length - 1]?.to.toLowerCase();
+      const finalSource  = sourceAddress ?? fallbackSrc;
+      const finalSink    = sinkAddress   ?? fallbackSink;
 
       // Track which nodes are actually used in edges
       const connectedNodes = new Set();
 
       // Add source and sink addresses to connected nodes
-      if (sourceAddress) connectedNodes.add(sourceAddress);
-      if (sinkAddress) connectedNodes.add(sinkAddress);
+      if (finalSource) connectedNodes.add(finalSource);
+      if (finalSink) connectedNodes.add(finalSink);
 
       // First pass: create all edges and track connected nodes
       pathData.transfers.forEach(transfer => {
