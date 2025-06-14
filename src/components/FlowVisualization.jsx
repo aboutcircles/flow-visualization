@@ -1,20 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useFormData } from '@/hooks/useFormData';
 import { usePathData } from '@/hooks/usePathData';
+import { usePerformance } from '@/contexts/PerformanceContext';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import Header from '@/components/ui/header';
-import CollapsibleSidebar from '@/components/CollapsibleSidebar';
+import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
 import TransactionTable from '@/components/ui/transaction_table';
 import FlowMatrixParams from '@/components/FlowMatrixParams';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { AlertTriangle, GripHorizontal } from 'lucide-react';
+import PathStats from '@/components/PathStats';
 
 const FlowVisualization = () => {
-  // State for UI components
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [activeTab, setActiveTab] = useState('transactions');
+  const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
+  const [tableHeight, setTableHeight] = useState(320); // Default height in pixels
+  const cytoscapeRef = useRef(null);
+  const autoSimplifiedRef = useRef(false);
+  const containerRef = useRef(null);
+  const isDraggingRef = useRef(false);
   
-  // Form data state
+  const { shouldAutoSimplify, setPreset, toggleFeature, config } = usePerformance();
+  
   const { 
     formData, 
     handleInputChange, 
@@ -24,13 +36,13 @@ const FlowVisualization = () => {
     handleToTokensExclusionToggle
   } = useFormData();
   
-  // Path data and related state
   const {
     pathData,
     loadPathData,
     isLoading,
     error,
     wrappedTokens,
+    tokenInfo,
     tokenOwnerProfiles,
     nodeProfiles,
     balancesByAccount,
@@ -42,26 +54,109 @@ const FlowVisualization = () => {
     boundMax
   } = usePathData();
   
-  // Handle form submission
-  const handleFindPath = async () => {
-    await loadPathData(formData);
-    setSelectedTransactionId(null); // Reset selection when loading new data
-  };
+  // Define keyboard shortcuts
+  useKeyboardShortcuts([
+    { key: '+', callback: () => cytoscapeRef.current?.zoomIn() },
+    { key: '=', callback: () => cytoscapeRef.current?.zoomIn() },
+    { key: '-', callback: () => cytoscapeRef.current?.zoomOut() },
+    { key: '0', callback: () => cytoscapeRef.current?.fit() },
+    { key: 'f', callback: () => cytoscapeRef.current?.fit() },
+    { key: 'c', callback: () => cytoscapeRef.current?.center() },
+    { key: '1', callback: () => setPreset('low') },
+    { key: '2', callback: () => setPreset('medium') },
+    { key: '3', callback: () => setPreset('high') },
+    { key: '4', callback: () => setPreset('ultra') },
+    { key: 'l', callback: () => toggleFeature('edgeLabels') },
+    { key: 'g', callback: () => toggleFeature('edgeGradients') },
+    { key: 't', callback: () => toggleFeature('tooltips') },
+    { key: 's', callback: () => setIsCollapsed(!isCollapsed) },
+  ]);
   
-  // Handle transaction selection
-  const handleTransactionSelect = (transactionId) => {
+  // Auto-simplify for large graphs
+  useEffect(() => {
+    if (pathData && !autoSimplifiedRef.current) {
+      const edgeCount = pathData.transfers?.length || 0;
+      const isVeryLarge = edgeCount > config.thresholds.veryLargeGraphEdgeCount;
+      
+      if (isVeryLarge && !config.rendering.fastMode) {
+        setShowPerformanceWarning(true);
+        setPreset('low');
+        console.log(`Auto-simplifying very large graph with ${edgeCount} edges`);
+      } else if (shouldAutoSimplify()) {
+        setPreset('low');
+        console.log('Auto-simplifying graph due to size');
+      }
+      
+      autoSimplifiedRef.current = true;
+    }
+  }, [pathData, config.thresholds.veryLargeGraphEdgeCount, config.rendering.fastMode, shouldAutoSimplify, setPreset]);
+  
+  const handleFindPath = useCallback(async () => {
+    autoSimplifiedRef.current = false;
+    await loadPathData(formData);
+    setSelectedTransactionId(null);
+  }, [formData, loadPathData]);
+  
+  const handleTransactionSelect = useCallback((transactionId) => {
     setSelectedTransactionId(transactionId);
-    // Switch to transactions tab when a transaction is selected
     setActiveTab('transactions');
-  };
+  }, []);
+
+  // Handle resize
+  const handleMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDraggingRef.current || !containerRef.current) return;
+      
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const newHeight = containerRect.bottom - e.clientY;
+      
+      // Set min/max heights
+      const minHeight = 100;
+      const maxHeight = containerRect.height - 200;
+      
+      if (newHeight >= minHeight && newHeight <= maxHeight) {
+        setTableHeight(newHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      isDraggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
+  // Debug wrapped tokens
+  useEffect(() => {
+    if (wrappedTokens.length > 0) {
+      console.log('Wrapped tokens detected:', wrappedTokens);
+      console.log('Token info:', tokenInfo);
+    }
+  }, [wrappedTokens, tokenInfo]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <Header />
-      <div className="flex flex-col mt-16">
-        <div className="flex flex-1 min-h-[50vh]">
-          {/* Sidebar */}
-          <CollapsibleSidebar
+      {/* Main content area with proper spacing for header */}
+      <div className="flex flex-1 overflow-hidden pt-16">
+        <div className="flex w-full h-full">
+          {/* Left Panel */}
+          <CollapsibleLeftPanel
             isCollapsed={isCollapsed}
             setIsCollapsed={setIsCollapsed}
             formData={formData}
@@ -82,69 +177,132 @@ const FlowVisualization = () => {
             boundMax={boundMax}
           />
 
-          {/* Main content area */}
-          <div className={`
-            flex-1 bg-white relative
-            transition-all duration-300 ease-in-out
-            ${isCollapsed ? 'ml-12' : 'ml-0'}
-          `}>
-            {pathData ? (
-              <CytoscapeVisualization
-                pathData={pathData}
-                wrappedTokens={wrappedTokens}
-                nodeProfiles={nodeProfiles}
-                tokenOwnerProfiles={tokenOwnerProfiles}
-                balancesByAccount={balancesByAccount}
-                minCapacity={minCapacity}
-                maxCapacity={maxCapacity}
-                onTransactionSelect={handleTransactionSelect}
-                selectedTransactionId={selectedTransactionId}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-500">
-                Enter addresses and click "Find Path" to visualize the flow
-              </div>
-            )}
-          </div>
-        </div>
+          {/* Right content area */}
+          <div ref={containerRef} className="flex-1 flex flex-col h-full overflow-hidden">
+            {/* Graph visualization area - takes remaining space */}
+            <div className="flex-1 bg-white relative overflow-hidden min-h-0">
+              {/* Performance Warning */}
+              {showPerformanceWarning && (
+                <Card className="absolute top-4 right-4 z-20 bg-yellow-50 border-yellow-200 max-w-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="text-yellow-600 mt-0.5" size={18} />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-yellow-800">Large Graph Detected</p>
+                        <p className="text-xs text-yellow-700 mt-1">
+                          This graph has {pathData?.transfers?.length || 0} edges. Fast mode has been enabled for better performance.
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-2"
+                          onClick={() => setShowPerformanceWarning(false)}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-        {/* Tabbed content for transactions and flow matrix */}
-        {pathData && (
-          <div className="p-4 bg-gray-50">
-            <Tabs>
-              <TabsList>
-                <TabsTrigger 
-                  isActive={activeTab === 'transactions'} 
-                  onClick={() => setActiveTab('transactions')}
-                >
-                  Transactions
-                </TabsTrigger>
-                <TabsTrigger 
-                  isActive={activeTab === 'parameters'} 
-                  onClick={() => setActiveTab('parameters')}
-                >
-                  Flow Matrix Parameters
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent isActive={activeTab === 'transactions'}>
-                <TransactionTable
-                  transfers={pathData.transfers}
-                  maxFlow={pathData.maxFlow}
+              {pathData ? (
+                <CytoscapeVisualization
+                  ref={cytoscapeRef}
+                  pathData={pathData}
+                  wrappedTokens={wrappedTokens}
+                  nodeProfiles={nodeProfiles}
+                  tokenOwnerProfiles={tokenOwnerProfiles}
+                  balancesByAccount={balancesByAccount}
+                  minCapacity={minCapacity}
+                  maxCapacity={maxCapacity}
                   onTransactionSelect={handleTransactionSelect}
                   selectedTransactionId={selectedTransactionId}
                 />
-              </TabsContent>
-              
-              <TabsContent isActive={activeTab === 'parameters'}>
-                <FlowMatrixParams
-                  pathData={pathData}
-                  sender={formData.From}
-                />
-              </TabsContent>
-            </Tabs>
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  <div className="text-center">
+                    <p className="mb-2">Enter addresses and click "Find Path" to visualize the flow</p>
+                    <p className="text-sm text-gray-400">
+                      Keyboard shortcuts: +/- zoom, F fit, C center, 1-4 presets, S toggle sidebar
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Resizable divider and table area */}
+            {pathData && (
+            <>
+              {/* Draggable divider */}
+              <div 
+                className="h-2 bg-gray-200 cursor-ns-resize hover:bg-gray-300 transition-colors flex items-center justify-center"
+                onMouseDown={handleMouseDown}
+              >
+                <GripHorizontal size={16} className="text-gray-500" />
+              </div>
+
+              {/* Table area with dynamic height */}
+              <div 
+                className="bg-gray-50 overflow-hidden flex flex-col"
+                style={{ height: `${tableHeight}px` }}
+              >
+                <Tabs className="flex flex-col h-full">
+                  <div className="px-4 pt-4">
+                    <TabsList>
+                      <TabsTrigger 
+                        isActive={activeTab === 'transactions'} 
+                        onClick={() => setActiveTab('transactions')}
+                      >
+                        Transactions ({pathData.transfers?.length || 0})
+                      </TabsTrigger>
+                      <TabsTrigger 
+                        isActive={activeTab === 'parameters'} 
+                        onClick={() => setActiveTab('parameters')}
+                      >
+                        Flow Matrix Parameters
+                      </TabsTrigger>
+                      <TabsTrigger 
+                        isActive={activeTab === 'stats'} 
+                        onClick={() => setActiveTab('stats')}
+                      >
+                        Path Stats
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+                  
+                  <div className="flex-1 overflow-auto px-4 pb-4">
+                    <TabsContent isActive={activeTab === 'transactions'} className="h-full">
+                      <TransactionTable
+                        transfers={pathData.transfers}
+                        maxFlow={pathData.maxFlow}
+                        onTransactionSelect={handleTransactionSelect}
+                        selectedTransactionId={selectedTransactionId}
+                      />
+                    </TabsContent>
+                    
+                    <TabsContent isActive={activeTab === 'parameters'} className="h-full">
+                      <FlowMatrixParams
+                        pathData={pathData}
+                        sender={formData.From}
+                      />
+                    </TabsContent>
+                    
+                    <TabsContent isActive={activeTab === 'stats'} className="h-full">
+                      <PathStats
+                        pathData={pathData}
+                        tokenOwnerProfiles={tokenOwnerProfiles}
+                        nodeProfiles={nodeProfiles}
+                        tokenInfo={tokenInfo}
+                      />
+                    </TabsContent>
+                  </div>
+                </Tabs>
+              </div>
+            </>
+          )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

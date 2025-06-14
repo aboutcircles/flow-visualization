@@ -2,33 +2,46 @@
 
 A React-based visualization tool for exploring and analyzing transaction paths in the Circles network. This application provides an interactive interface to visualize token transfer paths between addresses and analyze maximum flow capacity.
 
-![Visualization Example 1](img/viz1.png) 
+![Visualization Example 1](img/viz1.png)
 
 ## Features
 
-- Interactive graph visualization of token transfer paths
-- Filter paths by token inclusion or exclusion
-- Adjustable capacity range slider
-- Detailed transaction table with sorting capabilities
-- Flow matrix parameter generation for executing transfers
-- Tabbed interface for transaction details and path parameters
-- Profile information display for nodes and token owners
-- Support for wrapped token visualization
+### Core Functionality
+- **Interactive Graph Visualization** - Real-time rendering of complex token transfer networks using Cytoscape.js
+- **Dynamic Path Finding** - Find optimal transfer paths between addresses with configurable parameters
+- **Token Filtering** - Include or exclude specific tokens in path calculations
+- **Capacity Analysis** - Visualize and filter transfers based on flow capacity
+- **Flow Matrix Parameters** - Generate `operateFlowMatrix` parameters for on-chain execution
+- **Profile Integration** - Display human-readable names for addresses and tokens
+
+### Performance Features
+- **Adaptive Rendering** - Automatically adjusts visual complexity based on graph size
+- **Performance Presets** - Quick switching between quality levels (Fast, Balanced, Quality, Ultra)
+- **Progressive Loading** - Lazy loading of profile and balance data
+- **Caching System** - In-memory and localStorage caching for API responses
+- **Keyboard Shortcuts** - Efficient navigation and control
+
+### Visualization Features
+- **Multiple Layout Algorithms** - Klay, Dagre, Hierarchical, Circle, and Concentric layouts
+- **Edge Styling** - Capacity gradients, wrapped token indicators, over-capacity highlights
+- **Interactive Elements** - Hover tooltips, click-to-select transactions, zoom controls
+- **Resizable Panels** - Adjustable interface sections for optimal viewing
 
 ## Technology Stack
 
-- **React 18.2** - Frontend framework
-- **Cytoscape.js** - Graph visualization library
+- **React 18.2** - Frontend framework with hooks and context
+- **Cytoscape.js** - Graph visualization library with custom optimizations
 - **Tailwind CSS** - Utility-first CSS framework
-- **Radix UI** - Unstyled, accessible UI components
-- **Lucide React** - SVG icons
-- **Vite** - Build tool and development server
-- **Circles SDK** - For interacting with the Circles network
+- **Radix UI** - Accessible, unstyled UI primitives
+- **Recharts** - Data visualization for metrics
+- **Vite** - Next-generation build tool
+- **Circles SDK** - Official SDK for Circles network interaction
 
 ## Prerequisites
 
 - Node.js (version 16 or higher)
 - npm or yarn package manager
+- Modern web browser with ES6+ support
 
 ## Installation
 
@@ -48,261 +61,229 @@ npm install
 npm run dev
 ```
 
+The application will be available at `http://localhost:5173` (or the port shown in terminal).
+
 ## Project Structure
 
-The application follows a modular architecture that separates concerns into specialized components, hooks, and services:
+The application follows a modular architecture with clear separation of concerns:
 
 ```
 src/
 ├── components/
-│   ├── ui/
-│   │   ├── button.jsx               # Button component
-│   │   ├── card.jsx                 # Card component
-│   │   ├── header.jsx               # Application header
-│   │   ├── input.jsx                # Input fields
-│   │   ├── token-input.jsx          # Token input with multi-entry support
-│   │   ├── toggle-switch.jsx        # Toggle switch component
-│   │   ├── tooltip.jsx              # Tooltip for hover information
-│   │   ├── tabs.jsx                 # Tabbed interface component
-│   │   └── transaction_table.jsx    # Transaction data table
-│   ├── CollapsibleSidebar.jsx       # Sidebar with form controls
-│   ├── CytoscapeVisualization.jsx   # Graph visualization component
-│   ├── FlowMatrixParams.jsx         # Flow matrix parameter display
-│   ├── FlowVisualization.jsx        # Main application component
-│   └── PathFinderForm.jsx           # Path finding form
+│   ├── metrics/                     # Modular metrics system
+│   │   ├── BaseMetric.js           # Base class for all metrics
+│   │   ├── index.js                # Metric registry and helpers
+│   │   └── *Metric.jsx             # Individual metric implementations
+│   ├── ui/                         # Reusable UI components
+│   │   ├── button.jsx              # Button component
+│   │   ├── card.jsx                # Card component
+│   │   ├── header.jsx              # Application header
+│   │   ├── input.jsx               # Input fields
+│   │   ├── label.jsx               # Label component
+│   │   ├── tabs.jsx                # Tabbed interface
+│   │   ├── toggle-switch.jsx       # Toggle switch component
+│   │   ├── token-input.jsx         # Multi-token input
+│   │   ├── tooltip.jsx             # Hover tooltips
+│   │   └── transaction_table.jsx   # Transaction data table
+│   ├── CollapsibleLeftPanel.jsx    # Main control panel
+│   ├── CytoscapeVisualization.jsx  # Graph rendering component
+│   ├── FlowMatrixParams.jsx        # Parameter generation
+│   ├── FlowVisualization.jsx       # Main application component
+│   ├── GraphControls.jsx           # Graph interaction controls
+│   ├── GraphPerformanceControls.jsx # Performance settings
+│   ├── PathFinderForm.jsx          # Path finding form
+│   ├── PathStats.jsx               # Path statistics display
+│   └── PerformanceOverlay.jsx      # FPS/performance monitor
+├── config/
+│   └── performanceConfig.js        # Performance presets and defaults
+├── contexts/
+│   └── PerformanceContext.jsx      # Global performance state
 ├── hooks/
-│   ├── useCytoscape.js              # Manages Cytoscape graph instance
-│   ├── useFormData.js               # Manages form state and input
-│   └── usePathData.js               # Manages API data and related state
-├── services/
-│   └── circlesApi.js                # API integration layer
+│   ├── useCytoscapeFast.js        # Optimized Cytoscape hook
+│   ├── useFormData.js             # Form state management
+│   ├── useKeyboardShortcuts.js    # Keyboard shortcut handler
+│   ├── usePathData.js             # API data management
+│   └── usePerformanceMonitor.js   # Performance tracking
 ├── lib/
-│   └── utils.js                     # Utility functions
-├── App.jsx                          # Root application component
-└── main.jsx                         # Application entry point
+│   ├── graphOptimizer.js          # Graph optimization utilities
+│   └── utils.jsx                  # Utility functions
+├── services/
+│   ├── cacheService.js            # Caching implementation
+│   └── circlesApi.js              # API integration layer
+├── App.jsx                        # Root application component
+├── main.jsx                       # Application entry point
+└── index.css                      # Global styles
 ```
 
-## Modular Architecture
+## Architecture Overview
 
-### 1. Core Components
+### Component Architecture
 
-- **FlowVisualization**: Main controller component that coordinates all sub-components and hooks
-- **CytoscapeVisualization**: Responsible for rendering the graph visualization
-- **CollapsibleSidebar**: Contains form controls and manages sidebar state
-- **PathFinderForm**: Form for path finding parameters
-- **FlowMatrixParams**: Displays flow matrix parameters for path execution
+The application uses a hierarchical component structure:
 
-### 2. Custom Hooks
+1. **FlowVisualization** (Main Container)
+   - Manages global state and coordinates sub-components
+   - Handles keyboard shortcuts and performance monitoring
+   - Controls layout and panel visibility
 
-- **useFormData**: Manages form state, validation, and submission
-- **usePathData**: Handles API data fetching, processing, and related state
-- **useCytoscape**: Manages Cytoscape graph instance, events, and styling
+2. **CollapsibleLeftPanel** (Control Panel)
+   - **PathFinderForm** - Input controls for path finding
+   - **GraphPerformanceControls** - Performance settings
+   - Displays results and errors
 
-### 3. Services
+3. **CytoscapeVisualization** (Graph Display)
+   - Renders the network graph
+   - Handles node and edge styling
+   - Manages user interactions
 
-- **circlesApi.js**: Centralizes API calls and SDK integration
+4. **Bottom Panel** (Results)
+   - **TransactionTable** - Sortable list of transfers
+   - **FlowMatrixParams** - Generated parameters
+   - **PathStats** - Statistical analysis with visualizations
 
-### 4. UI Components
+### State Management
 
-Reusable UI components in the `ui/` directory that provide consistent styling and behavior across the application.
+The application uses React hooks and context for state management:
+
+- **PerformanceContext** - Global performance settings and monitoring
+- **useFormData** - Form state and validation
+- **usePathData** - API data fetching and caching
+- **useCytoscapeFast** - Optimized graph rendering
+
+### Performance Optimization
+
+The application implements several performance strategies:
+
+1. **Adaptive Rendering**
+   - Automatically switches to fast mode for graphs >500 edges
+   - Reduces visual complexity for very large graphs
+   - Progressive feature disabling based on graph size
+
+2. **Lazy Loading**
+   - Profile data loaded on-demand
+   - Balance data fetched only when needed
+   - Batch processing for large datasets
+
+3. **Caching Strategy**
+   - Two-tier caching (memory + localStorage)
+   - TTL-based expiration
+   - Automatic cleanup when storage is full
+
+4. **Rendering Optimizations**
+   - Viewport culling for off-screen elements
+   - Batch DOM updates
+   - Debounced event handlers
 
 ## API Integration
 
-The application connects to the Circles network API endpoint for path finding. The default endpoint is: `https://rpc.aboutcircles.com/`
+### Circles Network API
 
-### API Parameters
+The application connects to the Circles RPC endpoint:
+- Default endpoint: `https://rpc.aboutcircles.com/`
+- Methods: `circles_findPath`, profile lookups, balance queries
 
-The path finding request supports these parameters:
-
-- `Source`: Source address
-- `Sink`: Destination address
-- `TargetFlow`: Transfer amount (in wei)
-- `FromTokens`: (Optional) Source token addresses
-- `ToTokens`: (Optional) Destination token addresses
-- `ExcludedFromTokens`: (Optional) Source tokens to exclude
-- `ExcludedToTokens`: (Optional) Destination tokens to exclude
-- `WithWrap`: Boolean flag to include wrapped tokens
-
-## Extending the Application
-
-### Adding a New Field to Path Request
-
-Let's walk through an example of how to add a new field to the path request, such as a `MaxHops` parameter to limit the number of hops in a path.
-
-#### 1. Update the Form Data Hook
-
-First, modify the `useFormData.js` hook to include the new field:
+### Path Finding Parameters
 
 ```javascript
-// src/hooks/useFormData.js
-export const useFormData = () => {
-  const [formData, setFormData] = useState({
-    From: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    To: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
-    FromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    ToTokens: '',
-    ExcludedFromTokens: '',
-    ExcludedToTokens: '',
-    crcAmount: '1000', 
-    Amount: '1000000000000000000000',
-    WithWrap: true,
-    IsFromTokensExcluded: false,
-    IsToTokensExcluded: false,
-    MaxHops: 5, // New field for maximum hops
-  });
-  
-  // Add handler for the new field
-  const handleMaxHopsChange = (value) => {
-    setFormData(prev => ({
-      ...prev,
-      MaxHops: value
-    }));
-  };
-
-  return {
-    // Other return values...
-    handleMaxHopsChange
-  };
-};
+{
+  Source: "0x...",              // Source address
+  Sink: "0x...",                // Destination address
+  TargetFlow: "1000000...",     // Amount in wei
+  FromTokens: ["0x..."],        // Optional: source tokens
+  ToTokens: ["0x..."],          // Optional: destination tokens
+  ExcludedFromTokens: ["0x..."], // Optional: excluded source tokens
+  ExcludedToTokens: ["0x..."],   // Optional: excluded dest tokens
+  WithWrap: true                // Include wrapped tokens
+}
 ```
 
-#### 2. Update the API Service
+## Metrics System
 
-Next, modify the API service to include the new parameter in the request:
+The application includes a modular metrics system for analyzing paths:
+
+### Available Metrics
+
+1. **Transfer Count** - Total number of transfers
+2. **Intermediate Nodes** - Nodes between source and sink
+3. **Distinct Tokens** - Unique tokens used
+4. **Wrapped Token Usage** - Analysis of wrapped vs regular tokens
+5. **Flow Distribution** - Statistical analysis of flow amounts
+6. **Bottlenecks** - Transfers using >90% capacity
+7. **Token Distribution** - Usage across different tokens
+8. **Path Efficiency** - Comparison to optimal path
+9. **Average Node Degree** - Network connectivity
+
+### Adding Custom Metrics
+
+Create a new metric by extending the base pattern:
 
 ```javascript
-// src/services/circlesApi.js
-export const findPath = async (formData) => {
-  try {
-    // Existing code...
+// src/components/metrics/MyCustomMetric.jsx
+import { Icon } from 'lucide-react';
+import { createMetric, createMetricResult } from './BaseMetric';
+
+export default createMetric({
+  id: 'myCustomMetric',
+  name: 'My Custom Metric',
+  icon: Icon,
+  description: 'Description of what this measures',
+  order: 100, // Display order (lower = first)
+  
+  calculate: (pathData, tokenOwnerProfiles, nodeProfiles) => {
+    // Your calculation logic here
+    const value = computeValue(pathData);
     
-    // Create the params object for the JSON-RPC request
-    const params = {
-      Source: formData.From,
-      Sink: formData.To,
-      TargetFlow: formData.Amount,
-      // Add new parameter
-      MaxHops: formData.MaxHops
-    };
-    
-    // Rest of the existing code...
-  } catch (err) {
-    console.error('Fetch error:', err);
-    throw err;
+    return createMetricResult({
+      value: value,
+      description: 'Detailed description',
+      details: additionalData, // Optional
+    });
+  },
+  
+  // Optional: Add visualization
+  visualize: (pathData, value, details) => {
+    return <YourVisualizationComponent data={details} />;
   }
-};
+});
 ```
 
-#### 3. Add UI Controls
+Then register it in `src/components/metrics/index.js`.
 
-Add UI controls for the new field in the `PathFinderForm` component:
+## Keyboard Shortcuts
 
-```jsx
-// src/components/PathFinderForm.jsx
-const PathFinderForm = ({
-  formData,
-  handleInputChange,
-  handleTokensChange,
-  handleWithWrapToggle,
-  handleFromTokensExclusionToggle,
-  handleToTokensExclusionToggle,
-  handleMaxHopsChange, // New handler
-  onFindPath,
-  isLoading,
-  pathData,
-  minCapacity,
-  setMinCapacity,
-  maxCapacity,
-  setMaxCapacity,
-  boundMin,
-  boundMax
-}) => {
-  return (
-    <Card>
-      <CardContent className="space-y-4 pt-4">
-        {/* Existing form fields... */}
-        
-        {/* New field for MaxHops */}
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Maximum Hops
-          </label>
-          <Input
-            type="number"
-            min="1"
-            max="10"
-            value={formData.MaxHops}
-            onChange={(e) => handleMaxHopsChange(parseInt(e.target.value))}
-            className="w-full"
-          />
-        </div>
-        
-        {/* Rest of the form... */}
-      </CardContent>
-    </Card>
-  );
-};
-```
+| Key | Action |
+|-----|--------|
+| `+` / `=` | Zoom in |
+| `-` | Zoom out |
+| `0` / `F` | Fit graph to screen |
+| `C` | Center graph |
+| `1-4` | Switch performance presets |
+| `L` | Toggle edge labels |
+| `G` | Toggle edge gradients |
+| `T` | Toggle tooltips |
+| `S` | Toggle sidebar |
 
-#### 4. Pass the Props Through Component Chain
+## Performance Presets
 
-Update the component hierarchy to pass the new props:
+### Fast (1)
+- Minimal visual features
+- Best for graphs >500 edges
+- Straight edges, no animations
 
-```jsx
-// src/components/FlowVisualization.jsx
-const FlowVisualization = () => {
-  // Existing code...
-  
-  const { 
-    formData, 
-    handleInputChange, 
-    handleTokensChange, 
-    handleWithWrapToggle,
-    handleFromTokensExclusionToggle,
-    handleToTokensExclusionToggle,
-    handleMaxHopsChange // New handler
-  } = useFormData();
-  
-  return (
-    <div className="flex flex-col h-screen bg-gray-50">
-      <Header />
-      <div className="flex flex-col mt-16">
-        <div className="flex flex-1 min-h-[50vh]">
-          <CollapsibleSidebar
-            // Existing props...
-            handleMaxHopsChange={handleMaxHopsChange}
-            // Other props...
-          />
-          {/* Rest of the component... */}
-        </div>
-      </div>
-    </div>
-  );
-};
+### Balanced (2)
+- Essential features only
+- Good performance/quality trade-off
+- Tooltips enabled
 
-// src/components/CollapsibleSidebar.jsx
-const CollapsibleSidebar = ({
-  // Existing props...
-  handleMaxHopsChange,
-  // Other props...
-}) => {
-  return (
-    <div className="...">
-      {!isCollapsed && (
-        <div className="p-4 space-y-4">
-          <PathFinderForm
-            // Existing props...
-            handleMaxHopsChange={handleMaxHopsChange}
-            // Other props...
-          />
-        </div>
-      )}
-    </div>
-  );
-};
-```
+### Quality (3)
+- Most visual features enabled
+- Gradients and styling
+- For graphs <200 edges
 
-With these changes, the application now supports a new "Maximum Hops" parameter in the path finding request.
+### Ultra (4)
+- All features enabled
+- Curved edges, animations
+- Best visual quality
 
 ## Development
 
@@ -312,25 +293,102 @@ With these changes, the application now supports a new "Maximum Hops" parameter 
 npm run build
 ```
 
-### Running Tests
+The build output will be in the `dist/` directory.
 
-```bash
-npm run test
-```
-
-### Linting
+### Running the Linter
 
 ```bash
 npm run lint
 ```
 
-### Deployment
+### Preview Production Build
 
-To deploy to GitHub Pages:
+```bash
+npm run preview
+```
+
+### Deploy to GitHub Pages
 
 ```bash
 npm run deploy
 ```
+
+## Extending the Application
+
+### Adding a New API Parameter
+
+To add a new parameter to the path finding API:
+
+1. **Update Form Data Hook** (`useFormData.js`):
+```javascript
+const [formData, setFormData] = useState({
+  // ... existing fields
+  MaxTransfers: 10, // New field
+});
+```
+
+2. **Update API Service** (`circlesApi.js`):
+```javascript
+const params = {
+  // ... existing params
+  MaxTransfers: formData.MaxTransfers,
+};
+```
+
+3. **Add UI Control** (`PathFinderForm.jsx`):
+```jsx
+<div>
+  <label className="block text-sm font-medium mb-1">
+    Max Transfers
+  </label>
+  <Input
+    type="number"
+    value={formData.MaxTransfers}
+    onChange={(e) => handleInputChange(e)}
+    name="MaxTransfers"
+  />
+</div>
+```
+
+### Adding a New Layout Algorithm
+
+1. Install the Cytoscape extension if needed
+2. Register it in `useCytoscapeFast.js`
+3. Add to layout options in `GraphControls.jsx`
+4. Implement layout configuration in the `getLayoutConfig` function
+
+### Customizing Performance Thresholds
+
+Edit `src/config/performanceConfig.js` to adjust when optimizations trigger:
+
+```javascript
+thresholds: {
+  largeGraphNodeCount: 100,      // When to consider graph "large"
+  largeGraphEdgeCount: 200,      // Edge count for "large" graph
+  veryLargeGraphEdgeCount: 500,  // Trigger aggressive optimizations
+  autoSimplifyNodeCount: 300,    // Auto-switch to fast mode
+  autoSimplifyEdgeCount: 500     // Auto-switch to fast mode
+}
+```
+
+## Troubleshooting
+
+### Performance Issues
+
+1. **Large graphs are slow**: 
+   - Press `1` to switch to Fast mode
+   - Adjust capacity filter to reduce visible edges
+   - Disable features in performance controls
+
+2. **Graph doesn't fit screen**:
+   - Press `F` or `0` to fit
+   - Use zoom controls or mouse wheel
+
+3. **Labels overlapping**:
+   - Try different layout algorithms
+   - Zoom in to specific areas
+   - Disable edge labels in performance settings
+
 
 ## Contributing
 

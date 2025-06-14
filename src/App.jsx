@@ -1,8 +1,11 @@
 import FlowVisualization from './components/FlowVisualization'
+import { PerformanceProvider } from './contexts/PerformanceContext'
 
 function App() {
   return (
-    <FlowVisualization />
+    <PerformanceProvider>
+      <FlowVisualization />
+    </PerformanceProvider>
   )
 }
 
