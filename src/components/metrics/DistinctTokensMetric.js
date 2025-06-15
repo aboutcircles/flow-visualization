@@ -6,7 +6,8 @@ export default createMetric({
   name: 'Distinct Tokens',
   icon: Coins,
   description: 'Number of unique tokens used in the path',
-  order: 30,
+  order: 20,
+  layout: 'half',
   
   calculate: (pathData) => {
     const tokens = new Set(pathData.transfers.map(t => t.tokenOwner.toLowerCase()));

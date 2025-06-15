@@ -7,6 +7,7 @@ export default createMetric({
   icon: Activity,
   description: 'Number of individual token transfers in the path',
   order: 10,
+  layout: 'half',
   
   calculate: (pathData) => {
     return createMetricResult({

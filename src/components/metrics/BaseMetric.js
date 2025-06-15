@@ -15,6 +15,7 @@ export const createMetric = ({
   enabled = true, // Whether the metric is enabled by default
   requiresProfiles = false, // Whether this metric needs profile data
   requiresBalances = false, // Whether this metric needs balance data
+  layout = 'full', // 'full' | 'half'
 }) => ({
   id,
   name,
@@ -26,6 +27,7 @@ export const createMetric = ({
   enabled,
   requiresProfiles,
   requiresBalances,
+  layout
 });
 
 /**

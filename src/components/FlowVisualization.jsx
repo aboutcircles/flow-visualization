@@ -54,6 +54,82 @@ const FlowVisualization = () => {
     boundMax
   } = usePathData();
   
+  // Helper function to get Cytoscape instance
+  const getCyInstance = useCallback(() => {
+    // Try multiple methods to get the cy instance
+    
+    // Method 1: From cytoscapeRef
+    if (cytoscapeRef.current && cytoscapeRef.current.cyRef) {
+      return cytoscapeRef.current.cyRef.current;
+    }
+    
+    // Method 2: From window if stored
+    if (window._cyInstance) {
+      return window._cyInstance;
+    }
+    
+    // Method 3: From container with _cyreg
+    const containers = document.querySelectorAll('div');
+    for (let container of containers) {
+      if (container._cyreg && container._cyreg.cy) {
+        window._cyInstance = container._cyreg.cy; // Store for next time
+        return container._cyreg.cy;
+      }
+    }
+    
+    return null;
+  }, []);
+  
+  // Store cy instance when graph is ready
+  useEffect(() => {
+    if (!pathData) return;
+    
+    // Try to store cy instance after graph renders
+    const timer = setTimeout(() => {
+      const cy = getCyInstance();
+      if (cy) {
+        window._cyInstance = cy;
+        console.log('Stored Cytoscape instance');
+      }
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [pathData, getCyInstance]);
+  
+  // Function to highlight a path
+  const highlightPath = useCallback((transfers) => {
+    console.log('highlightPath called with transfers:', transfers);
+    
+    if (!transfers || transfers.length === 0) {
+      console.log('No transfers to highlight');
+      return;
+    }
+    
+    if (!cytoscapeRef.current) {
+      console.error('No cytoscapeRef.current');
+      return;
+    }
+    
+    // Use the exposed highlightPath method
+    if (cytoscapeRef.current.highlightPath) {
+      cytoscapeRef.current.highlightPath(transfers);
+      console.log('Path highlighted successfully');
+    } else {
+      console.error('highlightPath method not found on cytoscapeRef');
+    }
+  }, []);
+
+  // Expose the highlight function globally
+  useEffect(() => {
+    window.highlightPath = highlightPath;
+    window.getCyInstance = getCyInstance;
+    
+    return () => {
+      delete window.highlightPath;
+      delete window.getCyInstance;
+    };
+  }, [highlightPath, getCyInstance]);
+  
   // Define keyboard shortcuts
   useKeyboardShortcuts([
     { key: '+', callback: () => cytoscapeRef.current?.zoomIn() },
@@ -93,8 +169,19 @@ const FlowVisualization = () => {
   
   const handleFindPath = useCallback(async () => {
     autoSimplifiedRef.current = false;
+    setSelectedTransactionId(null); // Clear selected transaction
+    
+    // Clear any existing graph highlights
+    if (cytoscapeRef.current && cytoscapeRef.current.getCy) {
+      const cy = cytoscapeRef.current.getCy();
+      if (cy) {
+        cy.batch(() => {
+          cy.elements().removeClass('highlighted path-highlighted path-node');
+        });
+      }
+    }
+    
     await loadPathData(formData);
-    setSelectedTransactionId(null);
   }, [formData, loadPathData]);
   
   const handleTransactionSelect = useCallback((transactionId) => {
@@ -210,6 +297,7 @@ const FlowVisualization = () => {
                 <CytoscapeVisualization
                   ref={cytoscapeRef}
                   pathData={pathData}
+                  formData={formData}
                   wrappedTokens={wrappedTokens}
                   nodeProfiles={nodeProfiles}
                   tokenOwnerProfiles={tokenOwnerProfiles}

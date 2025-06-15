@@ -11,6 +11,7 @@ cytoscape.use(dagre);
 export const useCytoscape = ({
   containerRef,
   pathData,
+  formData,
   wrappedTokens,
   nodeProfiles,
   tokenOwnerProfiles,
@@ -27,35 +28,73 @@ export const useCytoscape = ({
 
   // Initialize graph when pathData changes
   useEffect(() => {
-    // Skip if already initializing or no data
-    if (isInitializingRef.current || !pathData || !containerRef.current) return;
+    // Store pathData globally for reference in highlighting
+    window._pathData = pathData;
+    
+    // Create a unique key for this graph instance to force proper re-initialization
+    const graphKey = `${pathData?.transfers?.length || 0}-${pathData?.maxFlow || 0}-${Date.now()}`;
+    
+    // Reset the initializing flag when pathData changes
+    isInitializingRef.current = false;
+    
+    // Skip if no data
+    if (!pathData || !containerRef.current) return;
+    
+    // Skip if already initializing
+    if (isInitializingRef.current) return;
     
     isInitializingRef.current = true;
     const startTime = performance.now();
 
-    // Process data
+    // Process data with improved self-transfer handling
     const fromSet = new Set();
     const toSet = new Set();
+    const allAddresses = new Set();
     
     pathData.transfers.forEach(t => {
-      fromSet.add(t.from.toLowerCase());
-      toSet.add(t.to.toLowerCase());
+      const from = t.from.toLowerCase();
+      const to = t.to.toLowerCase();
+      fromSet.add(from);
+      toSet.add(to);
+      allAddresses.add(from);
+      allAddresses.add(to);
     });
 
-    const sinkAddress = [...toSet].find(addr => !fromSet.has(addr));
-    const sourceAddress = [...fromSet].find(addr => !toSet.has(addr));
-    const finalSource = sourceAddress || pathData.transfers[0]?.from.toLowerCase();
-    const finalSink = sinkAddress || pathData.transfers[pathData.transfers.length - 1]?.to.toLowerCase();
+    // Find addresses that ONLY appear as source or ONLY as sink
+    const onlySourceAddresses = [...fromSet].filter(addr => !toSet.has(addr));
+    const onlySinkAddresses = [...toSet].filter(addr => !fromSet.has(addr));
+
+    // Determine final source and sink with better self-transfer detection
+    let finalSource, finalSink;
+
+    // First, try to use form data if available
+    if (formData?.From && formData?.To) {
+      finalSource = formData.From.toLowerCase();
+      finalSink = formData.To.toLowerCase();
+    } else if (onlySourceAddresses.length === 0 && onlySinkAddresses.length === 0) {
+      // All addresses appear as both source and sink - likely a cycle or self-transfer
+      finalSource = pathData.transfers[0]?.from.toLowerCase();
+      finalSink = pathData.transfers[pathData.transfers.length - 1]?.to.toLowerCase();
+    } else {
+      // Normal case - use addresses that only appear as source or sink
+      finalSource = onlySourceAddresses[0] || pathData.transfers[0]?.from.toLowerCase();
+      finalSink = onlySinkAddresses[0] || pathData.transfers[pathData.transfers.length - 1]?.to.toLowerCase();
+    }
+
+    // Explicitly check for self-transfer
+    const isSelfTransfer = finalSource === finalSink;
 
     const connectedNodes = new Set();
     if (finalSource) connectedNodes.add(finalSource);
     if (finalSink) connectedNodes.add(finalSink);
 
     const edges = [];
+    const edgeCountMap = new Map(); // Track edge counts between nodes
     
     pathData.transfers.forEach((transfer, index) => {
       const fromAddr = transfer.from.toLowerCase();
       const toAddr = transfer.to.toLowerCase();
+      const tokenOwner = transfer.tokenOwner.toLowerCase();
 
       connectedNodes.add(fromAddr);
       connectedNodes.add(toAddr);
@@ -63,45 +102,56 @@ export const useCytoscape = ({
       const flowValue = Number(transfer.value) / 1e18;
       const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
       
+      // Create a unique key for this edge type
+      const edgeTypeKey = `${fromAddr}-${toAddr}-${tokenOwner}`;
+      const edgeCount = edgeCountMap.get(edgeTypeKey) || 0;
+      edgeCountMap.set(edgeTypeKey, edgeCount + 1);
+      
       const edgeData = {
-        id: `e${index}`,
+        id: `e${index}`, // Unique ID based on transfer index
         source: fromAddr,
         target: toAddr,
         flowValue: flowValue,
         weight: Math.max(1, Math.min(flowPercentage / 10, 10)),
         flowAtto: transfer.value,
         percentage: flowPercentage.toFixed(2),
-        tokenOwner: transfer.tokenOwner.toLowerCase(),
-        isWrapped: wrappedTokens.includes(transfer.tokenOwner.toLowerCase()),
+        tokenOwner: tokenOwner,
+        isWrapped: wrappedTokens.includes(tokenOwner),
         originalFrom: transfer.from,
         originalTo: transfer.to,
-        originalTokenOwner: transfer.tokenOwner
+        originalTokenOwner: transfer.tokenOwner,
+        transferIndex: index, // Store the original transfer index
+        edgeTypeCount: edgeCount // Store which instance of this edge type this is
       };
 
       edges.push({ data: edgeData });
     });
 
     const nodes = Array.from(connectedNodes).map(id => {
-      const isSource = id === finalSource;
-      const isSink = id === finalSink;
-      const isSameSourceSink = finalSource === finalSink;
+      // Improved node type detection
+      const isSource = id === finalSource && !isSelfTransfer;
+      const isSink = id === finalSink && !isSelfTransfer;
+      const isSameSourceSink = id === finalSource && id === finalSink && isSelfTransfer;
 
       let color;
-      if (isSameSourceSink && isSource && isSink) {
-        color = '#e0f63b';
+      if (isSameSourceSink) {
+        color = '#e0f63b'; // Yellow for self-transfer
       } else if (isSource) {
-        color = '#3B82F6';
+        color = '#3B82F6'; // Blue for source
       } else if (isSink) {
-        color = '#EF4444';
+        color = '#EF4444'; // Red for sink
       } else {
-        color = '#CBD5E1';
+        color = '#CBD5E1'; // Gray for intermediate
       }
 
       const nodeData = {
         id,
         color,
         isSource,
-        isSink
+        isSink,
+        isSameSourceSink,
+        // Add a version key to force style updates
+        version: Date.now()
       };
 
       // Add label
@@ -114,14 +164,25 @@ export const useCytoscape = ({
     });
 
     try {
-      // Destroy previous instance if exists
+      // More thorough cleanup of previous instance
       if (cyRef.current) {
         try {
+          cyRef.current.removeAllListeners();
           cyRef.current.destroy();
         } catch (e) {
           console.warn('Error destroying previous cytoscape instance:', e);
         }
         cyRef.current = null;
+      }
+      
+      // Clear the container's HTML to ensure no residual elements
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
+      }
+      
+      // Also clear any stored instance in window
+      if (window._cyInstance) {
+        window._cyInstance = null;
       }
 
       updateStats({
@@ -131,7 +192,7 @@ export const useCytoscape = ({
 
       const isVeryLarge = edges.length > 500;
 
-      // Styles
+      // Styles with self-transfer specific styling
       const styles = [
         {
           selector: 'node',
@@ -147,6 +208,14 @@ export const useCytoscape = ({
               'text-margin-y': isVeryLarge ? '5px' : '10px',
               'min-zoomed-font-size': 4
             })
+          }
+        },
+        {
+          selector: 'node[?isSameSourceSink]',
+          style: {
+            'border-width': 3,
+            'border-color': '#ca8a04', // Darker yellow border
+            'border-style': 'solid'
           }
         },
         {
@@ -199,6 +268,7 @@ export const useCytoscape = ({
         });
       }
 
+      // Highlighted transaction style
       styles.push({
         selector: '.highlighted',
         style: {
@@ -209,69 +279,66 @@ export const useCytoscape = ({
         }
       });
 
+      // Path highlighting styles
+      styles.push({
+        selector: '.path-highlighted',
+        style: {
+          'line-color': '#DC2626',
+          'target-arrow-color': '#DC2626',
+          'width': 5,
+          'z-index': 9999,
+          'line-opacity': 1,
+          'target-arrow-shape': 'triangle',
+          'arrow-scale': 1.2,
+          'line-style': 'solid',
+          'overlay-opacity': 0.8,
+          'overlay-color': '#DC2626',
+          'overlay-padding': 2
+        }
+      });
+      
+      styles.push({
+        selector: '.path-node',
+        style: {
+          'background-color': '#F87171',  
+          'border-width': 3,
+          'border-color': '#DC2626',
+          'z-index': 9999,
+          'width': isVeryLarge ? '30px' : '50px',  
+          'height': isVeryLarge ? '30px' : '50px',
+          'overlay-opacity': 0
+        }
+      });
+
       // Layout config
       const getLayoutConfig = () => {
         const baseConfig = {
           fit: true,
           padding: isVeryLarge ? 10 : 30,
-          animate: false
+          animate: false,
+          // Add randomization seed based on graph key to ensure consistent layout
+          randomize: false,
+          ready: () => {
+            // Force a redraw after layout to ensure proper rendering
+            if (cyRef.current) {
+              cyRef.current.resize();
+              cyRef.current.center();
+            }
+          }
         };
 
         switch (layoutName) {
           case 'hierarchical':
-            // Calculate hop distances from source for strict hierarchical layout
-            const hopDistances = {};
-            hopDistances[finalSource] = 0;
-            
-            // BFS to calculate hop distances
-            const queue = [finalSource];
-            const visited = new Set([finalSource]);
-            
-            while (queue.length > 0) {
-              const current = queue.shift();
-              const currentDistance = hopDistances[current];
-              
-              // Find all nodes connected from current
-              edges.forEach(edge => {
-                const data = edge.data;
-                if (data.source === current && !visited.has(data.target)) {
-                  visited.add(data.target);
-                  hopDistances[data.target] = currentDistance + 1;
-                  queue.push(data.target);
-                }
-              });
-            }
-            
-            // Group nodes by hop distance
-            const nodesByHop = {};
-            let maxHop = 0;
-            
-            nodes.forEach(node => {
-              const nodeId = node.data.id;
-              const hop = hopDistances[nodeId] ?? 999; // Put unconnected nodes at the end
-              maxHop = Math.max(maxHop, hop === 999 ? maxHop : hop);
-              
-              if (!nodesByHop[hop]) {
-                nodesByHop[hop] = [];
-              }
-              nodesByHop[hop].push(nodeId);
-            });
-            
             return {
               ...baseConfig,
-              name: 'breadthfirst',
-              directed: true,
-              roots: [finalSource],
-              maximal: true,
-              grid: false,
-              spacingFactor: isVeryLarge ? 1.5 : 3,
-              avoidOverlap: true,
-              nodeDimensionsIncludeLabels: true,
-              sort: (a, b) => {
-                const aHop = hopDistances[a.id()] ?? 999;
-                const bHop = hopDistances[b.id()] ?? 999;
-                return aHop - bHop;
-              }
+              name: 'dagre',
+              rankDir: 'LR',
+              align: 'UL',
+              rankSep: isVeryLarge ? 50 : 100,
+              nodeSep: isVeryLarge ? 20 : 40,
+              edgeSep: 10,
+              ranker: 'network-simplex',
+              acyclicer: 'greedy'
             };
           case 'dagre':
             return {
@@ -286,6 +353,7 @@ export const useCytoscape = ({
               ...baseConfig,
               name: 'breadthfirst',
               directed: true,
+              roots: finalSource ? [finalSource] : undefined,
               spacingFactor: isVeryLarge ? 0.5 : 1.2
             };
           case 'circle':
@@ -315,7 +383,7 @@ export const useCytoscape = ({
         }
       };
 
-      // Create Cytoscape instance
+      // Create Cytoscape instance with unique container ID
       const cy = cytoscape({
         container: containerRef.current,
         elements: { nodes, edges },
@@ -338,12 +406,19 @@ export const useCytoscape = ({
       });
 
       cyRef.current = cy;
+      
+      // Store instance globally for debugging
+      window._cyInstance = cy;
 
       // After layout, fit with more padding for large graphs
       cy.ready(() => {
         if (isVeryLarge) {
           cy.fit(cy.elements(), 100);
         }
+        // Force a style update to ensure proper coloring
+        cy.nodes().forEach(node => {
+          node.data('version', Date.now());
+        });
       });
 
       // Event listeners with enhanced tooltips
@@ -370,7 +445,9 @@ export const useCytoscape = ({
               tooltipText += `\nTotal balance: ${totalCrc.toFixed(6)} CRC`;
             }
             
-            if (node.data('isSource')) {
+            if (node.data('isSameSourceSink')) {
+              tooltipText += '\n(Self-Transfer: Source & Sink)';
+            } else if (node.data('isSource')) {
               tooltipText += '\n(Source)';
             } else if (node.data('isSink')) {
               tooltipText += '\n(Sink)';
@@ -456,7 +533,7 @@ export const useCytoscape = ({
       isInitializingRef.current = false;
     }
 
-  }, [pathData, wrappedTokens]); // Add wrappedTokens to dependencies
+  }, [pathData, formData, wrappedTokens, config.rendering.features, config.rendering.fastMode, updateStats, nodeProfiles, tokenOwnerProfiles, balancesByAccount, onTooltip, onTransactionSelect, layoutName]);
 
   // Update edge styles when config changes
   useEffect(() => {
@@ -639,10 +716,14 @@ export const useCytoscape = ({
 
     const isVeryLarge = cy.edges().length > 500;
     
+    // Get source node for hierarchical layouts
+    const sourceNode = cy.nodes().filter(node => node.data('isSource') || node.data('isSameSourceSink'))[0];
+    const sourceId = sourceNode ? sourceNode.id() : undefined;
+    
     const getLayoutConfig = () => {
       const baseConfig = {
         fit: true,
-        padding: isVeryLarge ? 100 : 30,
+        padding: isVeryLarge ? 10 : 30,
         animate: !isVeryLarge && !config.rendering.fastMode,
         animationDuration: isVeryLarge ? 0 : 300
       };
@@ -652,13 +733,13 @@ export const useCytoscape = ({
           return {
             ...baseConfig,
             name: 'dagre',
-            rankDir: 'LR', // Left to right
-            align: 'UL', // Align nodes to upper left
-            rankSep: isVeryLarge ? 100 : 200, // Separation between ranks (columns)
-            nodeSep: isVeryLarge ? 30 : 50, // Separation between nodes in same rank
-            edgeSep: 25, // Separation between edges
-            ranker: 'longest-path', // Use longest path to assign ranks
-            acyclicer: 'greedy' // Remove cycles
+            rankDir: 'LR',
+            align: 'UL',
+            rankSep: isVeryLarge ? 50 : 100,
+            nodeSep: isVeryLarge ? 20 : 40,
+            edgeSep: 10,
+            ranker: 'network-simplex',
+            acyclicer: 'greedy'
           };
         case 'dagre':
           return {
@@ -673,6 +754,7 @@ export const useCytoscape = ({
             ...baseConfig,
             name: 'breadthfirst',
             directed: true,
+            roots: sourceId ? [sourceId] : undefined,
             spacingFactor: isVeryLarge ? 0.5 : 1.2
           };
         case 'circle':
@@ -772,6 +854,12 @@ export const useCytoscape = ({
           console.warn('Error cleaning up cytoscape:', e);
         }
         cyRef.current = null;
+      }
+      if (window._cyInstance) {
+        window._cyInstance = null;
+      }
+      if (window._pathData) {
+        window._pathData = null;
       }
     };
   }, []);

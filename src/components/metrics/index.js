@@ -1,12 +1,8 @@
-// src/components/metrics/index.js
 import TransferCountMetric from './TransferCountMetric';
 import IntermediateNodesMetric from './IntermediateNodesMetric';
 import DistinctTokensMetric from './DistinctTokensMetric';
-import FlowDistributionMetric from './FlowDistributionMetric.jsx';
-import BottlenecksMetric from './BottlenecksMetric.jsx';
-import TokenDistributionMetric from './TokenDistributionMetric.jsx';
+import DistinctPathsMetric from './DistinctPathsMetric.jsx';
 import PathEfficiencyMetric from './PathEfficiencyMetric';
-import AverageNodeDegreeMetric from './AverageNodeDegreeMetric';
 import WrappedTokenMetric from './WrappedTokenMetric.jsx';
 
 // Import all metrics here
@@ -14,11 +10,8 @@ const allMetrics = [
   TransferCountMetric,
   IntermediateNodesMetric,
   DistinctTokensMetric,
-  FlowDistributionMetric,
-  BottlenecksMetric,
-  TokenDistributionMetric,
+  DistinctPathsMetric,
   PathEfficiencyMetric,
-  AverageNodeDegreeMetric,
   WrappedTokenMetric
 ];
 
@@ -44,19 +37,44 @@ export const calculateAllMetrics = (pathData, tokenInfo, nodeProfiles) => {
   
   return enabledMetrics.map(metric => {
     try {
+      // Add timeout protection for each metric
+      const startTime = Date.now();
       const result = metric.calculate(pathData, tokenInfo, nodeProfiles);
+      const calcTime = Date.now() - startTime;
       
-      // If metric has a visualize function, generate the visualization
-      let visualization = null;
-      if (metric.visualize && result.value !== null) {
-        visualization = metric.visualize(pathData, result.value, result.details);
+      // Log slow calculations
+      if (calcTime > 1000) {
+        console.warn(`Metric ${metric.id} took ${calcTime}ms to calculate`);
       }
       
-      return {
+      // Create the full metric result object
+      const fullResult = {
         ...metric,
-        ...result,
-        visualization
+        ...result
       };
+      
+      // If metric has a visualize function, generate the visualization
+      if (metric.visualize && result.value !== null && result.value !== 'Error' && result.value !== 'Too Large') {
+        try {
+          // Wrap visualization in try-catch
+          let visualization = null;
+          
+          // Check if the visualize function expects 4 parameters
+          if (metric.visualize.length >= 4) {
+            visualization = metric.visualize(pathData, result.value, result.details, result);
+          } else {
+            // Fall back to 3 parameter version
+            visualization = metric.visualize(pathData, result.value, result.details);
+          }
+          
+          fullResult.visualization = visualization;
+        } catch (vizError) {
+          console.error(`Error creating visualization for ${metric.id}:`, vizError);
+          fullResult.visualization = null;
+        }
+      }
+      
+      return fullResult;
     } catch (error) {
       console.error(`Error calculating metric ${metric.id}:`, error);
       return {
@@ -64,6 +82,7 @@ export const calculateAllMetrics = (pathData, tokenInfo, nodeProfiles) => {
         value: 'Error',
         description: metric.description,
         error: error.message,
+        visualization: null
       };
     }
   });
