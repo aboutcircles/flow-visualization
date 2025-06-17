@@ -22,14 +22,15 @@
     "cytoscape-dagre": "^2.5.0",
     "cytoscape-klay": "^3.1.4",
     "dagre": "^0.8.5",
+    "echarts": "^5.6.0",
     "lucide-react": "^0.330.0",
     "multihashes": "^4.0.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "recharts": "^2.10.0",
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7",
-    "viem": "^2.23.14",
-    "recharts": "^2.10.0"
+    "viem": "^2.23.14"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",

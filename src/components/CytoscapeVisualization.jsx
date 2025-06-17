@@ -7,7 +7,8 @@ import {
   ZoomOut, 
   Maximize, 
   Move,
-  Layers
+  Layers,
+  GitBranch
 } from 'lucide-react';
 
 const CytoscapeVisualization = forwardRef(({ 
@@ -20,7 +21,8 @@ const CytoscapeVisualization = forwardRef(({
   minCapacity,
   maxCapacity,
   onTransactionSelect,
-  selectedTransactionId
+  selectedTransactionId,
+  onVisualizationModeChange
 }, ref) => {
   const containerRef = useRef(null);
   const [tooltip, setTooltip] = useState({ text: '', position: null });
@@ -121,8 +123,15 @@ const CytoscapeVisualization = forwardRef(({
 
   // Handle layout change
   const handleLayoutChange = (newLayout) => {
-    setLayoutName(newLayout);
-    runLayout(newLayout);
+    if (newLayout === 'sankey') {
+      // Switch to Sankey visualization
+      if (onVisualizationModeChange) {
+        onVisualizationModeChange('sankey');
+      }
+    } else {
+      setLayoutName(newLayout);
+      runLayout(newLayout);
+    }
   };
 
   return (
@@ -181,9 +190,14 @@ const CytoscapeVisualization = forwardRef(({
               <option value="breadthfirst">Breadthfirst</option>
               <option value="circle">Circle</option>
               <option value="concentric">Concentric</option>
+              <option value="sankey" className="font-semibold">
+                ↗ Sankey View
+              </option>
             </select>
           </div>
         </div>
+        
+
       </div>
       
       {/* Tooltip */}
