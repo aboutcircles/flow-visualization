@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import * as echarts from 'echarts';
 import { usePerformance } from '@/contexts/PerformanceContext';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import * as SliderPrimitive from '@radix-ui/react-slider';
 
-const SankeyVisualization = ({ 
+const SankeyVisualization = forwardRef(({ 
   pathData,
   formData,
   wrappedTokens,
@@ -23,7 +23,7 @@ const SankeyVisualization = ({
   maxCapacity,
   onTransactionSelect,
   selectedTransactionId
-}) => {
+}, ref) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const { config } = usePerformance();
@@ -31,6 +31,7 @@ const SankeyVisualization = ({
   const [renderingStrategy, setRenderingStrategy] = useState('standard');
   const [showAggregated, setShowAggregated] = useState(false);
   const [zoom, setZoom] = useState({ scale: 1, translateX: 0, translateY: 0 });
+  const [highlightedPath, setHighlightedPath] = useState(null);
 
   // Calculate max flow for conditional check
   const maxFlow = useMemo(() => {
@@ -47,6 +48,28 @@ const SankeyVisualization = ({
     }
     const hue = hash % 360;
     return `hsl(${hue}, 70%, 50%)`;
+  }, []);
+
+  // Expose methods to parent component
+  useImperativeHandle(ref, () => ({
+    chartInstance,
+    highlightPath: (transfers) => {
+      if (!chartInstance.current || !transfers || transfers.length === 0) {
+        clearHighlight();
+        return;
+      }
+      
+      console.log('Sankey: Highlighting path with transfers:', transfers);
+      setHighlightedPath(transfers);
+    },
+    clearHighlight: () => {
+      setHighlightedPath(null);
+    }
+  }));
+
+  // Clear highlight function
+  const clearHighlight = useCallback(() => {
+    setHighlightedPath(null);
   }, []);
 
   // Determine rendering strategy based on graph size
@@ -362,6 +385,17 @@ const SankeyVisualization = ({
       const flowValue = Number(transfer.value) / 1e18;
       const isWrapped = wrappedTokens.includes(transfer.tokenOwner);
       
+      // Check if this transfer is part of the highlighted path
+      let isHighlighted = false;
+      if (highlightedPath && highlightedPath.length > 0) {
+        isHighlighted = highlightedPath.some(highlightTransfer => 
+          highlightTransfer.from.toLowerCase() === transfer.from.toLowerCase() &&
+          highlightTransfer.to.toLowerCase() === transfer.to.toLowerCase() &&
+          highlightTransfer.tokenOwner.toLowerCase() === transfer.tokenOwner.toLowerCase() &&
+          highlightTransfer.value === transfer.value
+        );
+      }
+      
       return {
         source: sourceNode,
         target: targetNode,
@@ -369,10 +403,12 @@ const SankeyVisualization = ({
         tokenOwner: transfer.tokenOwner,
         transferIndex: index,
         originalTransfer: transfer,
+        isHighlighted: isHighlighted,
         lineStyle: {
-          color: getTokenColor(transfer.tokenOwner),
-          opacity: 0.6,
-          type: isWrapped ? 'dashed' : 'solid'
+          color: isHighlighted ? '#DC2626' : getTokenColor(transfer.tokenOwner),
+          opacity: highlightedPath ? (isHighlighted ? 0.9 : 0.1) : 0.6,
+          type: isWrapped ? 'dashed' : 'solid',
+          width: isHighlighted ? 3 : undefined
         },
         emphasis: {
           lineStyle: {
@@ -383,7 +419,7 @@ const SankeyVisualization = ({
     });
 
     return { nodes, links, strategy };
-  }, [minCapacity, maxCapacity, wrappedTokens, showAggregated, getTokenColor]);
+  }, [minCapacity, maxCapacity, wrappedTokens, showAggregated, getTokenColor, highlightedPath]);
 
   // Initialize and update chart
   useEffect(() => {
@@ -564,6 +600,11 @@ const SankeyVisualization = ({
 
     chartInstance.current.setOption(option, true);
 
+    // Store instance globally
+    window._sankeyInstance = chartInstance.current;
+    // Also store the ref for easier access
+    window._sankeyRef = ref;
+
     // Handle click events
     chartInstance.current.on('click', 'series.sankey.edge', function(params) {
       const link = params.data;
@@ -595,8 +636,14 @@ const SankeyVisualization = ({
       if (chartInstance.current) {
         chartInstance.current.off('click');
       }
+      if (window._sankeyInstance === chartInstance.current) {
+        window._sankeyInstance = null;
+      }
+      if (window._sankeyRef === ref) {
+        window._sankeyRef = null;
+      }
     };
-  }, [pathData, formData, nodeProfiles, tokenOwnerProfiles, balancesByAccount, config.rendering.features, transformToSankeyData, onTransactionSelect, determineRenderingStrategy]);
+  }, [pathData, formData, nodeProfiles, tokenOwnerProfiles, balancesByAccount, config.rendering.features, transformToSankeyData, onTransactionSelect, determineRenderingStrategy, ref]);
 
   // Highlight selected transaction
   useEffect(() => {
@@ -730,8 +777,20 @@ const SankeyVisualization = ({
     setZoom(prev => ({ ...prev, translateX: 0, translateY: 0 }));
   }, []);
 
+  // Handle escape key to clear highlight
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && highlightedPath) {
+        clearHighlight();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [highlightedPath, clearHighlight]);
+
   return (
-    <div className="relative w-full h-full overflow-hidden">
+    <div className="relative w-full h-full overflow-hidden" data-viz-mode="sankey">
       {/* Chart container with zoom transform */}
       <div 
         ref={chartRef}
@@ -784,8 +843,20 @@ const SankeyVisualization = ({
 
 
       </div>
+      
+      {/* Highlight indicator */}
+      {highlightedPath && (
+        <div className="absolute top-4 right-4 z-20 bg-white rounded-lg shadow-sm p-2">
+          <div className="flex items-center gap-2 text-sm">
+            <div className="w-3 h-3 bg-red-600 rounded-full"></div>
+            <span>Path highlighted (ESC to clear)</span>
+          </div>
+        </div>
+      )}
     </div>
   );
-};
+});
+
+SankeyVisualization.displayName = 'SankeyVisualization';
 
 export default SankeyVisualization;

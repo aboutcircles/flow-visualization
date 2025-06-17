@@ -23,6 +23,7 @@ const FlowVisualization = () => {
   const [tableHeight, setTableHeight] = useState(320); // Default height in pixels
   const [visualizationMode, setVisualizationMode] = useState('graph'); // 'graph' or 'sankey'
   const cytoscapeRef = useRef(null);
+  const sankeyRef = useRef(null); // ADD THIS LINE
   const autoSimplifiedRef = useRef(false);
   const containerRef = useRef(null);
   const isDraggingRef = useRef(false);
@@ -107,22 +108,34 @@ const FlowVisualization = () => {
       return;
     }
     
-    if (visualizationMode !== 'graph') {
-      console.log('Not in graph mode, skipping highlight');
-      return;
-    }
-    
-    if (!cytoscapeRef.current) {
-      console.error('No cytoscapeRef.current');
-      return;
-    }
-    
-    // Use the exposed highlightPath method
-    if (cytoscapeRef.current.highlightPath) {
-      cytoscapeRef.current.highlightPath(transfers);
-      console.log('Path highlighted successfully');
-    } else {
-      console.error('highlightPath method not found on cytoscapeRef');
+    if (visualizationMode === 'graph') {
+      console.log('In graph mode, using Cytoscape highlight');
+      if (!cytoscapeRef.current) {
+        console.error('No cytoscapeRef.current');
+        return;
+      }
+      
+      // Use the exposed highlightPath method
+      if (cytoscapeRef.current.highlightPath) {
+        cytoscapeRef.current.highlightPath(transfers);
+        console.log('Path highlighted successfully in graph');
+      } else {
+        console.error('highlightPath method not found on cytoscapeRef');
+      }
+    } else if (visualizationMode === 'sankey') {
+      console.log('In sankey mode, using Sankey highlight');
+      if (!sankeyRef.current) {
+        console.error('No sankeyRef.current');
+        return;
+      }
+      
+      // Use the exposed highlightPath method for Sankey
+      if (sankeyRef.current.highlightPath) {
+        sankeyRef.current.highlightPath(transfers);
+        console.log('Path highlighted successfully in sankey');
+      } else {
+        console.error('highlightPath method not found on sankeyRef');
+      }
     }
   }, [visualizationMode]);
 
@@ -187,6 +200,8 @@ const FlowVisualization = () => {
           cy.elements().removeClass('highlighted path-highlighted path-node');
         });
       }
+    } else if (visualizationMode === 'sankey' && sankeyRef.current && sankeyRef.current.clearHighlight) {
+      sankeyRef.current.clearHighlight();
     }
     
     await loadPathData(formData);
@@ -352,6 +367,7 @@ const FlowVisualization = () => {
                   />
                 ) : (
                   <SankeyVisualization
+                    ref={sankeyRef}  
                     pathData={pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
