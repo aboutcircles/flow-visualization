@@ -209,12 +209,20 @@ export default createMetric({
     }
     
     const clearAllHighlights = () => {
+      // Clear Cytoscape highlights
       if (window.getCyInstance) {
         const cy = window.getCyInstance();
         if (cy) {
           cy.batch(() => {
             cy.elements().removeClass('highlighted path-highlighted path-node');
           });
+        }
+      }
+      
+      // Clear Sankey highlights - ADDED THIS
+      if (window._sankeyInstance && window._sankeyRef && window._sankeyRef.current) {
+        if (window._sankeyRef.current.clearHighlight) {
+          window._sankeyRef.current.clearHighlight();
         }
       }
     };
