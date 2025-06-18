@@ -26,7 +26,7 @@ export default createMetric({
     // Clear path indices when calculating new paths
     pathIndices.clear();
     // Skip path computation for large graphs
-    if (pathData.transfers.length > 200) {
+    if (pathData.transfers.length > 1000) {
       return createMetricResult({
         value: 'Too Large',
         description: 'Graph too large for path analysis',
