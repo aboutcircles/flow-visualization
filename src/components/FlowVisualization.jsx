@@ -6,6 +6,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
+import SankeyVisualization from '@/components/visualizations/SankeyVisualization';
 import TransactionTable from '@/components/ui/transaction_table';
 import FlowMatrixParams from '@/components/FlowMatrixParams';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -20,7 +21,9 @@ const FlowVisualization = () => {
   const [activeTab, setActiveTab] = useState('transactions');
   const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
   const [tableHeight, setTableHeight] = useState(320); // Default height in pixels
+  const [visualizationMode, setVisualizationMode] = useState('graph'); // 'graph' or 'sankey'
   const cytoscapeRef = useRef(null);
+  const sankeyRef = useRef(null);
   const autoSimplifiedRef = useRef(false);
   const containerRef = useRef(null);
   const isDraggingRef = useRef(false);
@@ -82,7 +85,7 @@ const FlowVisualization = () => {
   
   // Store cy instance when graph is ready
   useEffect(() => {
-    if (!pathData) return;
+    if (!pathData || visualizationMode !== 'graph') return;
     
     // Try to store cy instance after graph renders
     const timer = setTimeout(() => {
@@ -94,7 +97,7 @@ const FlowVisualization = () => {
     }, 1000);
     
     return () => clearTimeout(timer);
-  }, [pathData, getCyInstance]);
+  }, [pathData, visualizationMode, getCyInstance]);
   
   // Function to highlight a path
   const highlightPath = useCallback((transfers) => {
@@ -105,39 +108,67 @@ const FlowVisualization = () => {
       return;
     }
     
-    if (!cytoscapeRef.current) {
-      console.error('No cytoscapeRef.current');
-      return;
+    if (visualizationMode === 'graph') {
+      console.log('In graph mode, using Cytoscape highlight');
+      if (!cytoscapeRef.current) {
+        console.error('No cytoscapeRef.current');
+        return;
+      }
+      
+      // Use the exposed highlightPath method
+      if (cytoscapeRef.current.highlightPath) {
+        cytoscapeRef.current.highlightPath(transfers);
+        console.log('Path highlighted successfully in graph');
+      } else {
+        console.error('highlightPath method not found on cytoscapeRef');
+      }
+    } else if (visualizationMode === 'sankey') {
+      console.log('In sankey mode, using Sankey highlight');
+      if (!sankeyRef.current) {
+        console.error('No sankeyRef.current');
+        return;
+      }
+      
+      // Use the exposed highlightPath method for Sankey
+      if (sankeyRef.current.highlightPath) {
+        sankeyRef.current.highlightPath(transfers);
+        console.log('Path highlighted successfully in sankey');
+      } else {
+        console.error('highlightPath method not found on sankeyRef');
+      }
     }
-    
-    // Use the exposed highlightPath method
-    if (cytoscapeRef.current.highlightPath) {
-      cytoscapeRef.current.highlightPath(transfers);
-      console.log('Path highlighted successfully');
-    } else {
-      console.error('highlightPath method not found on cytoscapeRef');
+  }, [visualizationMode]);
+
+  // Function to clear highlights
+  const clearHighlights = useCallback(() => {
+    if (visualizationMode === 'graph' && cytoscapeRef.current?.clearHighlight) {
+      cytoscapeRef.current.clearHighlight();
+    } else if (visualizationMode === 'sankey' && sankeyRef.current?.clearHighlight) {
+      sankeyRef.current.clearHighlight();
     }
-  }, []);
+  }, [visualizationMode]);
 
   // Expose the highlight function globally
   useEffect(() => {
     window.highlightPath = highlightPath;
     window.getCyInstance = getCyInstance;
+    window.clearHighlights = clearHighlights;
     
     return () => {
       delete window.highlightPath;
       delete window.getCyInstance;
+      delete window.clearHighlights;
     };
-  }, [highlightPath, getCyInstance]);
+  }, [highlightPath, getCyInstance, clearHighlights]);
   
   // Define keyboard shortcuts
   useKeyboardShortcuts([
-    { key: '+', callback: () => cytoscapeRef.current?.zoomIn() },
-    { key: '=', callback: () => cytoscapeRef.current?.zoomIn() },
-    { key: '-', callback: () => cytoscapeRef.current?.zoomOut() },
-    { key: '0', callback: () => cytoscapeRef.current?.fit() },
-    { key: 'f', callback: () => cytoscapeRef.current?.fit() },
-    { key: 'c', callback: () => cytoscapeRef.current?.center() },
+    { key: '+', callback: () => visualizationMode === 'graph' && cytoscapeRef.current?.zoomIn() },
+    { key: '=', callback: () => visualizationMode === 'graph' && cytoscapeRef.current?.zoomIn() },
+    { key: '-', callback: () => visualizationMode === 'graph' && cytoscapeRef.current?.zoomOut() },
+    { key: '0', callback: () => visualizationMode === 'graph' && cytoscapeRef.current?.fit() },
+    { key: 'f', callback: () => visualizationMode === 'graph' && cytoscapeRef.current?.fit() },
+    { key: 'c', callback: () => visualizationMode === 'graph' && cytoscapeRef.current?.center() },
     { key: '1', callback: () => setPreset('low') },
     { key: '2', callback: () => setPreset('medium') },
     { key: '3', callback: () => setPreset('high') },
@@ -146,11 +177,13 @@ const FlowVisualization = () => {
     { key: 'g', callback: () => toggleFeature('edgeGradients') },
     { key: 't', callback: () => toggleFeature('tooltips') },
     { key: 's', callback: () => setIsCollapsed(!isCollapsed) },
+    { key: 'k', callback: () => setVisualizationMode(mode => mode === 'graph' ? 'sankey' : 'graph') },
+    { key: 'Escape', callback: clearHighlights },
   ]);
   
   // Auto-simplify for large graphs
   useEffect(() => {
-    if (pathData && !autoSimplifiedRef.current) {
+    if (pathData && !autoSimplifiedRef.current && visualizationMode === 'graph') {
       const edgeCount = pathData.transfers?.length || 0;
       const isVeryLarge = edgeCount > config.thresholds.veryLargeGraphEdgeCount;
       
@@ -165,24 +198,15 @@ const FlowVisualization = () => {
       
       autoSimplifiedRef.current = true;
     }
-  }, [pathData, config.thresholds.veryLargeGraphEdgeCount, config.rendering.fastMode, shouldAutoSimplify, setPreset]);
+  }, [pathData, config.thresholds.veryLargeGraphEdgeCount, config.rendering.fastMode, shouldAutoSimplify, setPreset, visualizationMode]);
   
   const handleFindPath = useCallback(async () => {
     autoSimplifiedRef.current = false;
     setSelectedTransactionId(null); // Clear selected transaction
-    
-    // Clear any existing graph highlights
-    if (cytoscapeRef.current && cytoscapeRef.current.getCy) {
-      const cy = cytoscapeRef.current.getCy();
-      if (cy) {
-        cy.batch(() => {
-          cy.elements().removeClass('highlighted path-highlighted path-node');
-        });
-      }
-    }
+    clearHighlights(); // Clear any existing highlights
     
     await loadPathData(formData);
-  }, [formData, loadPathData]);
+  }, [formData, loadPathData, clearHighlights]);
   
   const handleTransactionSelect = useCallback((transactionId) => {
     setSelectedTransactionId(transactionId);
@@ -268,8 +292,30 @@ const FlowVisualization = () => {
           <div ref={containerRef} className="flex-1 flex flex-col h-full overflow-hidden">
             {/* Graph visualization area - takes remaining space */}
             <div className="flex-1 bg-white relative overflow-hidden min-h-0">
+              {/* Visualization Mode Toggle */}
+              {pathData && (
+                <div className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow-sm p-1 flex">
+                  <Button
+                    size="sm"
+                    variant={visualizationMode === 'graph' ? 'default' : 'ghost'}
+                    onClick={() => setVisualizationMode('graph')}
+                    className="rounded-r-none"
+                  >
+                    Graph
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={visualizationMode === 'sankey' ? 'default' : 'ghost'}
+                    onClick={() => setVisualizationMode('sankey')}
+                    className="rounded-l-none"
+                  >
+                    Sankey
+                  </Button>
+                </div>
+              )}
+
               {/* Performance Warning */}
-              {showPerformanceWarning && (
+              {showPerformanceWarning && visualizationMode === 'graph' && (
                 <Card className="absolute top-4 right-4 z-20 bg-yellow-50 border-yellow-200 max-w-sm">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-2">
@@ -279,14 +325,25 @@ const FlowVisualization = () => {
                         <p className="text-xs text-yellow-700 mt-1">
                           This graph has {pathData?.transfers?.length || 0} edges. Fast mode has been enabled for better performance.
                         </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="mt-2"
-                          onClick={() => setShowPerformanceWarning(false)}
-                        >
-                          Dismiss
-                        </Button>
+                        <p className="text-xs text-yellow-700 mt-1">
+                          Try the Sankey view for better performance with large graphs.
+                        </p>
+                        <div className="flex gap-2 mt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setVisualizationMode('sankey')}
+                          >
+                            Switch to Sankey
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShowPerformanceWarning(false)}
+                          >
+                            Dismiss
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -294,25 +351,42 @@ const FlowVisualization = () => {
               )}
 
               {pathData ? (
-                <CytoscapeVisualization
-                  ref={cytoscapeRef}
-                  pathData={pathData}
-                  formData={formData}
-                  wrappedTokens={wrappedTokens}
-                  nodeProfiles={nodeProfiles}
-                  tokenOwnerProfiles={tokenOwnerProfiles}
-                  balancesByAccount={balancesByAccount}
-                  minCapacity={minCapacity}
-                  maxCapacity={maxCapacity}
-                  onTransactionSelect={handleTransactionSelect}
-                  selectedTransactionId={selectedTransactionId}
-                />
+                visualizationMode === 'graph' ? (
+                  <CytoscapeVisualization
+                    ref={cytoscapeRef}
+                    pathData={pathData}
+                    formData={formData}
+                    wrappedTokens={wrappedTokens}
+                    nodeProfiles={nodeProfiles}
+                    tokenOwnerProfiles={tokenOwnerProfiles}
+                    balancesByAccount={balancesByAccount}
+                    minCapacity={minCapacity}
+                    maxCapacity={maxCapacity}
+                    onTransactionSelect={handleTransactionSelect}
+                    selectedTransactionId={selectedTransactionId}
+                    onVisualizationModeChange={setVisualizationMode}
+                  />
+                ) : (
+                  <SankeyVisualization
+                    ref={sankeyRef}  
+                    pathData={pathData}
+                    formData={formData}
+                    wrappedTokens={wrappedTokens}
+                    nodeProfiles={nodeProfiles}
+                    tokenOwnerProfiles={tokenOwnerProfiles}
+                    balancesByAccount={balancesByAccount}
+                    minCapacity={minCapacity}
+                    maxCapacity={maxCapacity}
+                    onTransactionSelect={handleTransactionSelect}
+                    selectedTransactionId={selectedTransactionId}
+                  />
+                )
               ) : (
                 <div className="flex items-center justify-center h-full text-gray-500">
                   <div className="text-center">
                     <p className="mb-2">Enter addresses and click "Find Path" to visualize the flow</p>
                     <p className="text-sm text-gray-400">
-                      Keyboard shortcuts: +/- zoom, F fit, C center, 1-4 presets, S toggle sidebar
+                      Keyboard shortcuts: +/- zoom, F fit, C center, 1-4 presets, S toggle sidebar, K switch view, ESC clear highlights
                     </p>
                   </div>
                 </div>

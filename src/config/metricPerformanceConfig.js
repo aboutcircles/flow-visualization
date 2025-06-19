@@ -3,8 +3,8 @@ export const METRIC_PERFORMANCE_THRESHOLDS = {
   // Graph size thresholds
   SMALL_GRAPH: 50,      // transfers
   MEDIUM_GRAPH: 100,    // transfers
-  LARGE_GRAPH: 500,     // transfers
-  VERY_LARGE_GRAPH: 2000, // transfers - increased to allow computation for graphs up to 2000
+  LARGE_GRAPH: 1000,    // transfers - increased from 500
+  VERY_LARGE_GRAPH: 5000, // transfers - increased from 2000
   
   // Path analysis limits
   MAX_PATHS_TO_ANALYZE: 1000,
@@ -12,7 +12,7 @@ export const METRIC_PERFORMANCE_THRESHOLDS = {
   MAX_PATHS_TO_DISPLAY: 10,
   
   // Timeout for expensive calculations (ms)
-  CALCULATION_TIMEOUT: 10000, // Increased to 10 seconds
+  CALCULATION_TIMEOUT: 10000,
 };
 
 // Metric performance categories
@@ -36,7 +36,7 @@ export const shouldCalculateMetric = (metricId, transferCount) => {
   }
   
   if (METRIC_CATEGORIES.EXPENSIVE.includes(metricId)) {
-    return transferCount < METRIC_PERFORMANCE_THRESHOLDS.LARGE_GRAPH;
+    return transferCount < METRIC_PERFORMANCE_THRESHOLDS.VERY_LARGE_GRAPH;
   }
   
   return true;

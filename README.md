@@ -2,39 +2,46 @@
 
 A React-based visualization tool for exploring and analyzing transaction paths in the Circles network. This application provides an interactive interface to visualize token transfer paths between addresses and analyze maximum flow capacity.
 
-![Visualization Example 1](img/viz1.png)
+<p float="left">
+  <img src="img/viz1.png" width="45%" />
+  <img src="img/viz2.png" width="45%" />
+</p>
 
 ## Features
 
 ### Core Functionality
-- **Interactive Graph Visualization** - Real-time rendering of complex token transfer networks using Cytoscape.js
+- **Interactive Graph Visualization** - Real-time rendering of token transfer networks using Cytoscape.js
+- **Sankey Diagram View** - Alternative visualization mode showing flow distribution
 - **Dynamic Path Finding** - Find optimal transfer paths between addresses with configurable parameters
 - **Token Filtering** - Include or exclude specific tokens in path calculations
 - **Capacity Analysis** - Visualize and filter transfers based on flow capacity
 - **Flow Matrix Parameters** - Generate `operateFlowMatrix` parameters for on-chain execution
 - **Profile Integration** - Display human-readable names for addresses and tokens
 
+### Visualization Features
+- **Dual Visualization Modes** - Switch between Graph (Cytoscape) and Sankey (ECharts) views
+- **Multiple Layout Algorithms** - Klay, Hierarchical, Dagre, Breadthfirst, Circle, and Concentric layouts
+- **Self-Transfer Support** - Proper handling of circular flows when source equals sink
+- **Path Highlighting** - Interactive path exploration through distinct flow analysis
+- **Edge Styling** - Capacity gradients, wrapped token indicators, over-capacity highlights
+- **Interactive Elements** - Hover tooltips, click-to-select transactions, zoom controls
+- **Resizable Panels** - Adjustable interface sections for optimal viewing
+
 ### Performance Features
 - **Adaptive Rendering** - Automatically adjusts visual complexity based on graph size
 - **Performance Presets** - Quick switching between quality levels (Fast, Balanced, Quality, Ultra)
 - **Progressive Loading** - Lazy loading of profile and balance data
 - **Caching System** - In-memory and localStorage caching for API responses
-- **Keyboard Shortcuts** - Efficient navigation and control
-
-### Visualization Features
-- **Multiple Layout Algorithms** - Klay, Dagre, Hierarchical, Circle, and Concentric layouts
-- **Edge Styling** - Capacity gradients, wrapped token indicators, over-capacity highlights
-- **Interactive Elements** - Hover tooltips, click-to-select transactions, zoom controls
-- **Resizable Panels** - Adjustable interface sections for optimal viewing
 
 ## Technology Stack
 
 - **React 18.2** - Frontend framework with hooks and context
-- **Cytoscape.js** - Graph visualization library with custom optimizations
+- **Cytoscape.js** - Graph visualization library with klay and dagre layouts
+- **ECharts** - Charting library for Sankey diagrams and metrics visualization
 - **Tailwind CSS** - Utility-first CSS framework
 - **Radix UI** - Accessible, unstyled UI primitives
 - **Recharts** - Data visualization for metrics
-- **Vite** - Next-generation build tool
+- **Vite** - Build tool
 - **Circles SDK** - Official SDK for Circles network interaction
 
 ## Prerequisites
@@ -65,15 +72,18 @@ The application will be available at `http://localhost:5173` (or the port shown 
 
 ## Project Structure
 
-The application follows a modular architecture with clear separation of concerns:
-
 ```
 src/
 ├── components/
 │   ├── metrics/                     # Modular metrics system
 │   │   ├── BaseMetric.js           # Base class for all metrics
-│   │   ├── index.js                # Metric registry and helpers
-│   │   └── *Metric.jsx             # Individual metric implementations
+│   │   ├── DistinctPathsMetric.jsx # Path analysis with visualization
+│   │   ├── DistinctTokensMetric.js # Token counting metric
+│   │   ├── IntermediateNodesMetric.js # Node analysis
+│   │   ├── PathEfficiencyMetric.js # Direct flow efficiency
+│   │   ├── TransferCountMetric.js  # Transfer counting
+│   │   ├── WrappedTokenMetric.jsx  # Wrapped token analysis
+│   │   └── index.js                # Metric registry
 │   ├── ui/                         # Reusable UI components
 │   │   ├── button.jsx              # Button component
 │   │   ├── card.jsx                # Card component
@@ -85,26 +95,26 @@ src/
 │   │   ├── token-input.jsx         # Multi-token input
 │   │   ├── tooltip.jsx             # Hover tooltips
 │   │   └── transaction_table.jsx   # Transaction data table
+│   ├── visualizations/
+│   │   ├── SankeyVisualization.jsx # Sankey diagram component
+│   │   └── index.js                # Visualization exports
 │   ├── CollapsibleLeftPanel.jsx    # Main control panel
 │   ├── CytoscapeVisualization.jsx  # Graph rendering component
 │   ├── FlowMatrixParams.jsx        # Parameter generation
 │   ├── FlowVisualization.jsx       # Main application component
-│   ├── GraphControls.jsx           # Graph interaction controls
 │   ├── GraphPerformanceControls.jsx # Performance settings
 │   ├── PathFinderForm.jsx          # Path finding form
-│   ├── PathStats.jsx               # Path statistics display
-│   └── PerformanceOverlay.jsx      # FPS/performance monitor
-├── config/
-│   └── performanceConfig.js        # Performance presets and defaults
+│   └── PathStats.jsx               # Path statistics display
 ├── contexts/
 │   └── PerformanceContext.jsx      # Global performance state
 ├── hooks/
-│   ├── useCytoscapeFast.js        # Optimized Cytoscape hook
+│   ├── useCytoscape.js            # Cytoscape integration hook
 │   ├── useFormData.js             # Form state management
 │   ├── useKeyboardShortcuts.js    # Keyboard shortcut handler
 │   ├── usePathData.js             # API data management
 │   └── usePerformanceMonitor.js   # Performance tracking
 ├── lib/
+│   ├── flowPathComputation.js     # Path computation algorithms
 │   ├── graphOptimizer.js          # Graph optimization utilities
 │   └── utils.jsx                  # Utility functions
 ├── services/
@@ -115,64 +125,76 @@ src/
 └── index.css                      # Global styles
 ```
 
-## Architecture Overview
+## Usage Guide
 
-### Component Architecture
+### Basic Path Finding
 
-The application uses a hierarchical component structure:
+1. **Enter Addresses**:
+   - **From Address**: Source address for the transfer
+   - **To Address**: Destination address
+   - **Value**: Amount to transfer in CRC
 
-1. **FlowVisualization** (Main Container)
-   - Manages global state and coordinates sub-components
-   - Handles keyboard shortcuts and performance monitoring
-   - Controls layout and panel visibility
+2. **Configure Tokens** (Optional):
+   - Add specific tokens to include or exclude
+   - Toggle between "Including" and "Excluding" mode
+   - Enable/disable wrapped tokens
 
-2. **CollapsibleLeftPanel** (Control Panel)
-   - **PathFinderForm** - Input controls for path finding
-   - **GraphPerformanceControls** - Performance settings
-   - Displays results and errors
+3. **Find Path**:
+   - Click "Find Path" to compute the optimal route
+   - The visualization will show all possible transfers
 
-3. **CytoscapeVisualization** (Graph Display)
-   - Renders the network graph
-   - Handles node and edge styling
-   - Manages user interactions
+### Visualization Modes
 
-4. **Bottom Panel** (Results)
-   - **TransactionTable** - Sortable list of transfers
-   - **FlowMatrixParams** - Generated parameters
-   - **PathStats** - Statistical analysis with visualizations
+#### Graph View (Cytoscape)
+- **Blue nodes**: Source addresses
+- **Red nodes**: Sink addresses
+- **Yellow nodes**: Self-transfer nodes (when source = sink)
+- **Gray nodes**: Intermediate addresses
+- **Edge thickness**: Represents flow amount
+- **Dashed edges**: Wrapped token transfers
 
-### State Management
+#### Sankey View
+- Shows flow distribution from source to sink
+- Better for understanding flow proportions
+- Handles self-transfers with virtual sink nodes
 
-The application uses React hooks and context for state management:
+### Interactive Features
 
-- **PerformanceContext** - Global performance settings and monitoring
-- **useFormData** - Form state and validation
-- **usePathData** - API data fetching and caching
-- **useCytoscapeFast** - Optimized graph rendering
+1. **Path Exploration**:
+   - Click on bars in the "Distinct Flow Paths" metric
+   - Highlights the selected path in the visualization
+   - Click again to cycle through multiple paths with same flow
+   - Press ESC to clear highlights
 
-### Performance Optimization
+2. **Transaction Selection**:
+   - Click on edges to select transactions
+   - Selected transaction appears in the table below
+   - View transaction details and parameters
 
-The application implements several performance strategies:
+3. **Capacity Filtering**:
+   - Use the slider to filter edges by capacity range
+   - Helpful for focusing on specific flow amounts
 
-1. **Adaptive Rendering**
-   - Automatically switches to fast mode for graphs >500 edges
-   - Reduces visual complexity for very large graphs
-   - Progressive feature disabling based on graph size
+## Metrics System
 
-2. **Lazy Loading**
-   - Profile data loaded on-demand
-   - Balance data fetched only when needed
-   - Batch processing for large datasets
+The application includes various metrics for analyzing paths:
 
-3. **Caching Strategy**
-   - Two-tier caching (memory + localStorage)
-   - TTL-based expiration
-   - Automatic cleanup when storage is full
+### Available Metrics
 
-4. **Rendering Optimizations**
-   - Viewport culling for off-screen elements
-   - Batch DOM updates
-   - Debounced event handlers
+1. **Total Transfers** - Number of individual token transfers
+2. **Intermediate Nodes** - Nodes between source and sink
+3. **Distinct Tokens** - Number of unique tokens used
+4. **Wrapped Token Usage** - Analysis of wrapped vs regular tokens
+5. **Path Efficiency** - Direct flow efficiency calculation
+6. **Distinct Flow Paths** - Interactive path analysis with visualization
+
+### Path Analysis
+
+The "Distinct Flow Paths" metric provides:
+- Grouping of paths by flow amount
+- Interactive bar chart for path exploration
+- Support for self-transfer cycles
+- Path highlighting in both Graph and Sankey views
 
 ## API Integration
 
@@ -180,7 +202,10 @@ The application implements several performance strategies:
 
 The application connects to the Circles RPC endpoint:
 - Default endpoint: `https://rpc.aboutcircles.com/`
-- Methods: `circles_findPath`, profile lookups, balance queries
+- Methods used:
+  - `circlesV2_findPath` - Path computation
+  - `circles_getTokenBalances` - Balance and token info
+  - Profile lookups via SDK
 
 ### Path Finding Parameters
 
@@ -197,57 +222,17 @@ The application connects to the Circles RPC endpoint:
 }
 ```
 
-## Metrics System
+## Self-Transfer Handling
 
-The application includes a modular metrics system for analyzing paths:
+When the source and sink addresses are the same, the application:
+1. Detects the self-transfer condition
+2. Creates a virtual sink node for visualization
+3. Displays both nodes with yellow color
+4. Shows the same label for consistency
+5. Properly computes paths through the virtual sink
+6. Maintains all interactive features
 
-### Available Metrics
-
-1. **Transfer Count** - Total number of transfers
-2. **Intermediate Nodes** - Nodes between source and sink
-3. **Distinct Tokens** - Unique tokens used
-4. **Wrapped Token Usage** - Analysis of wrapped vs regular tokens
-5. **Flow Distribution** - Statistical analysis of flow amounts
-6. **Bottlenecks** - Transfers using >90% capacity
-7. **Token Distribution** - Usage across different tokens
-8. **Path Efficiency** - Comparison to optimal path
-9. **Average Node Degree** - Network connectivity
-
-### Adding Custom Metrics
-
-Create a new metric by extending the base pattern:
-
-```javascript
-// src/components/metrics/MyCustomMetric.jsx
-import { Icon } from 'lucide-react';
-import { createMetric, createMetricResult } from './BaseMetric';
-
-export default createMetric({
-  id: 'myCustomMetric',
-  name: 'My Custom Metric',
-  icon: Icon,
-  description: 'Description of what this measures',
-  order: 100, // Display order (lower = first)
-  
-  calculate: (pathData, tokenOwnerProfiles, nodeProfiles) => {
-    // Your calculation logic here
-    const value = computeValue(pathData);
-    
-    return createMetricResult({
-      value: value,
-      description: 'Detailed description',
-      details: additionalData, // Optional
-    });
-  },
-  
-  // Optional: Add visualization
-  visualize: (pathData, value, details) => {
-    return <YourVisualizationComponent data={details} />;
-  }
-});
-```
-
-Then register it in `src/components/metrics/index.js`.
+This ensures that circular flows are properly visualized without breaking the directed acyclic graph requirements of the visualization libraries.
 
 ## Keyboard Shortcuts
 
@@ -257,33 +242,49 @@ Then register it in `src/components/metrics/index.js`.
 | `-` | Zoom out |
 | `0` / `F` | Fit graph to screen |
 | `C` | Center graph |
+| `K` | Switch between Graph and Sankey view |
 | `1-4` | Switch performance presets |
 | `L` | Toggle edge labels |
 | `G` | Toggle edge gradients |
 | `T` | Toggle tooltips |
 | `S` | Toggle sidebar |
+| `ESC` | Clear path highlights |
 
-## Performance Presets
+## Performance Settings
 
-### Fast (1)
-- Minimal visual features
-- Best for graphs >500 edges
-- Straight edges, no animations
+### Performance Presets
 
-### Balanced (2)
-- Essential features only
-- Good performance/quality trade-off
-- Tooltips enabled
+1. **Fast (1)**:
+   - Minimal visual features
+   - Best for large graphs
+   - Node labels remain visible
 
-### Quality (3)
-- Most visual features enabled
-- Gradients and styling
-- For graphs <200 edges
+2. **Balanced (2)**:
+   - Essential features only
+   - Good performance/quality trade-off
+   - Tooltips enabled
 
-### Ultra (4)
-- All features enabled
-- Curved edges, animations
-- Best visual quality
+3. **Quality (3)**:
+   - Most visual features enabled
+   - Edge gradients and styling
+   - Good for medium-sized graphs
+
+4. **Ultra (4)**:
+   - All features enabled
+   - Curved edges, all visual enhancements
+   - Best for small graphs
+
+### Manual Controls
+
+Toggle individual features:
+- Edge Labels
+- Node Labels
+- Capacity Gradients
+- Curved Edges
+- Tooltips
+- Wrapped Token Styling
+- Over-capacity Highlights
+- Dynamic Edge Width
 
 ## Development
 
@@ -315,85 +316,65 @@ npm run deploy
 
 ## Extending the Application
 
-### Adding a New API Parameter
+### Adding a New Metric
 
-To add a new parameter to the path finding API:
+Create a new metric in `src/components/metrics/`:
 
-1. **Update Form Data Hook** (`useFormData.js`):
 ```javascript
-const [formData, setFormData] = useState({
-  // ... existing fields
-  MaxTransfers: 10, // New field
+import { createMetric, createMetricResult } from './BaseMetric';
+import { YourIcon } from 'lucide-react';
+
+export default createMetric({
+  id: 'yourMetric',
+  name: 'Your Metric Name',
+  icon: YourIcon,
+  description: 'What this metric measures',
+  order: 50, // Display order
+  
+  calculate: (pathData, tokenInfo, nodeProfiles) => {
+    // Your calculation logic
+    const value = computeValue(pathData);
+    
+    return createMetricResult({
+      value: value,
+      description: 'Result description',
+      details: 'Additional details',
+    });
+  }
 });
 ```
 
-2. **Update API Service** (`circlesApi.js`):
+Then register it in `src/components/metrics/index.js`.
+
+### Adding Visualization Support
+
+The visualization modes are designed to handle different graph structures:
+
+1. **Graph View**: Best for exploring network topology
+2. **Sankey View**: Best for understanding flow distribution
+
+Both views support:
+- Path highlighting
+- Self-transfer flows
+- Interactive exploration
+- Synchronized state
+
+## Cache Management
+
+The application implements a two-tier cache:
+- **Memory Cache**: Fast access for current session
+- **LocalStorage Cache**: Persists between sessions
+
+Cache settings:
+- Profile data: 24-hour TTL
+- Token info: 1-hour TTL
+- Automatic cleanup when storage is full
+
+Clear cache via Performance panel or programmatically:
 ```javascript
-const params = {
-  // ... existing params
-  MaxTransfers: formData.MaxTransfers,
-};
+cacheService.clearAll();
 ```
-
-3. **Add UI Control** (`PathFinderForm.jsx`):
-```jsx
-<div>
-  <label className="block text-sm font-medium mb-1">
-    Max Transfers
-  </label>
-  <Input
-    type="number"
-    value={formData.MaxTransfers}
-    onChange={(e) => handleInputChange(e)}
-    name="MaxTransfers"
-  />
-</div>
-```
-
-### Adding a New Layout Algorithm
-
-1. Install the Cytoscape extension if needed
-2. Register it in `useCytoscapeFast.js`
-3. Add to layout options in `GraphControls.jsx`
-4. Implement layout configuration in the `getLayoutConfig` function
-
-### Customizing Performance Thresholds
-
-Edit `src/config/performanceConfig.js` to adjust when optimizations trigger:
-
-```javascript
-thresholds: {
-  largeGraphNodeCount: 100,      // When to consider graph "large"
-  largeGraphEdgeCount: 200,      // Edge count for "large" graph
-  veryLargeGraphEdgeCount: 500,  // Trigger aggressive optimizations
-  autoSimplifyNodeCount: 300,    // Auto-switch to fast mode
-  autoSimplifyEdgeCount: 500     // Auto-switch to fast mode
-}
-```
-
-## Troubleshooting
-
-### Performance Issues
-
-1. **Large graphs are slow**: 
-   - Press `1` to switch to Fast mode
-   - Adjust capacity filter to reduce visible edges
-   - Disable features in performance controls
-
-2. **Graph doesn't fit screen**:
-   - Press `F` or `0` to fit
-   - Use zoom controls or mouse wheel
-
-3. **Labels overlapping**:
-   - Try different layout algorithms
-   - Zoom in to specific areas
-   - Disable edge labels in performance settings
-
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
