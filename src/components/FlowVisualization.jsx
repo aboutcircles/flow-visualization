@@ -23,7 +23,7 @@ const FlowVisualization = () => {
   const [tableHeight, setTableHeight] = useState(320); // Default height in pixels
   const [visualizationMode, setVisualizationMode] = useState('graph'); // 'graph' or 'sankey'
   const cytoscapeRef = useRef(null);
-  const sankeyRef = useRef(null); // ADD THIS LINE
+  const sankeyRef = useRef(null);
   const autoSimplifiedRef = useRef(false);
   const containerRef = useRef(null);
   const isDraggingRef = useRef(false);
@@ -139,16 +139,27 @@ const FlowVisualization = () => {
     }
   }, [visualizationMode]);
 
+  // Function to clear highlights
+  const clearHighlights = useCallback(() => {
+    if (visualizationMode === 'graph' && cytoscapeRef.current?.clearHighlight) {
+      cytoscapeRef.current.clearHighlight();
+    } else if (visualizationMode === 'sankey' && sankeyRef.current?.clearHighlight) {
+      sankeyRef.current.clearHighlight();
+    }
+  }, [visualizationMode]);
+
   // Expose the highlight function globally
   useEffect(() => {
     window.highlightPath = highlightPath;
     window.getCyInstance = getCyInstance;
+    window.clearHighlights = clearHighlights;
     
     return () => {
       delete window.highlightPath;
       delete window.getCyInstance;
+      delete window.clearHighlights;
     };
-  }, [highlightPath, getCyInstance]);
+  }, [highlightPath, getCyInstance, clearHighlights]);
   
   // Define keyboard shortcuts
   useKeyboardShortcuts([
@@ -167,6 +178,7 @@ const FlowVisualization = () => {
     { key: 't', callback: () => toggleFeature('tooltips') },
     { key: 's', callback: () => setIsCollapsed(!isCollapsed) },
     { key: 'k', callback: () => setVisualizationMode(mode => mode === 'graph' ? 'sankey' : 'graph') },
+    { key: 'Escape', callback: clearHighlights },
   ]);
   
   // Auto-simplify for large graphs
@@ -191,21 +203,10 @@ const FlowVisualization = () => {
   const handleFindPath = useCallback(async () => {
     autoSimplifiedRef.current = false;
     setSelectedTransactionId(null); // Clear selected transaction
-    
-    // Clear any existing graph highlights
-    if (visualizationMode === 'graph' && cytoscapeRef.current && cytoscapeRef.current.getCy) {
-      const cy = cytoscapeRef.current.getCy();
-      if (cy) {
-        cy.batch(() => {
-          cy.elements().removeClass('highlighted path-highlighted path-node');
-        });
-      }
-    } else if (visualizationMode === 'sankey' && sankeyRef.current && sankeyRef.current.clearHighlight) {
-      sankeyRef.current.clearHighlight();
-    }
+    clearHighlights(); // Clear any existing highlights
     
     await loadPathData(formData);
-  }, [formData, loadPathData, visualizationMode]);
+  }, [formData, loadPathData, clearHighlights]);
   
   const handleTransactionSelect = useCallback((transactionId) => {
     setSelectedTransactionId(transactionId);
@@ -385,7 +386,7 @@ const FlowVisualization = () => {
                   <div className="text-center">
                     <p className="mb-2">Enter addresses and click "Find Path" to visualize the flow</p>
                     <p className="text-sm text-gray-400">
-                      Keyboard shortcuts: +/- zoom, F fit, C center, 1-4 presets, S toggle sidebar, K switch view
+                      Keyboard shortcuts: +/- zoom, F fit, C center, 1-4 presets, S toggle sidebar, K switch view, ESC clear highlights
                     </p>
                   </div>
                 </div>

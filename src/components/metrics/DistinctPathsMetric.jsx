@@ -11,6 +11,7 @@ import {
   Cell 
 } from 'recharts';
 import { createMetric, createMetricResult } from './BaseMetric';
+import { computeDistinctPathsForVisualization } from '@/lib/flowPathComputation';
 
 // Store current path indices for each flow amount
 const pathIndices = new Map();
@@ -25,14 +26,16 @@ export default createMetric({
   calculate: (pathData) => {
     // Clear path indices when calculating new paths
     pathIndices.clear();
+    
     // Skip path computation for large graphs
-    if (pathData.transfers.length > 1000) {
+    if (pathData.transfers.length > 5000) {
       return createMetricResult({
         value: 'Too Large',
         description: 'Graph too large for path analysis',
         details: `${pathData.transfers.length} transfers exceed analysis limit`,
         pathData: [],
-        fullPathData: []
+        fullPathData: [],
+        visualization: null
       });
     }
     
@@ -48,135 +51,24 @@ export default createMetric({
     const onlySourceAddresses = [...fromSet].filter(addr => !toSet.has(addr));
     const onlySinkAddresses = [...toSet].filter(addr => !fromSet.has(addr));
     
-    // Determine source and sink to ensure loop-finding is triggered.
+    // Determine source and sink
     let sourceAddress, sinkAddress;
     if (onlySourceAddresses.length === 0 && onlySinkAddresses.length === 0) {
-      // This indicates a purely circular graph.
       sourceAddress = pathData.transfers[0]?.from.toLowerCase();
-      // The sink MUST be the same as the source to find loops. This was the bug.
       sinkAddress = sourceAddress; 
     } else {
-      // The graph has clear entry and/or exit points.
       sourceAddress = onlySourceAddresses[0] || pathData.transfers[0]?.from.toLowerCase();
       sinkAddress = onlySinkAddresses[0] || pathData.transfers[pathData.transfers.length - 1]?.to.toLowerCase();
     }
     
-    // Build adjacency list
-    const graph = {};
-    pathData.transfers.forEach((transfer, transferIndex) => {
-      const from = transfer.from.toLowerCase();
-      const to = transfer.to.toLowerCase();
-      const flow = Number(transfer.value) / 1e18;
-      
-      if (!graph[from]) graph[from] = [];
-      graph[from].push({ 
-        to, 
-        flow, 
-        originalTransfer: transfer,
-        edgeIndex: transferIndex
-      });
-    });
+    console.log('Computing paths from', sourceAddress, 'to', sinkAddress);
     
-    // Find all paths using DFS
-    const paths = [];
-    const MAX_PATHS = 1000;
-    const MAX_PATH_LENGTH = 20;
-    
-    if (sourceAddress && sourceAddress === sinkAddress) {
-      const findCircularPaths = (startNode) => {
-        const dfsCircular = (node, currentPath, minFlow, transfers, visitedEdges = new Set(), visitedNodes = new Set()) => {
-          if (paths.length >= MAX_PATHS || currentPath.length > MAX_PATH_LENGTH) return;
-          
-          if (node === startNode && currentPath.length > 0) {
-            paths.push({ path: [...currentPath], flow: minFlow, transfers: [...transfers] });
-            return;
-          }
-          
-          if (visitedNodes.has(node) && node !== startNode) return;
-          visitedNodes.add(node);
-          
-          const edges = graph[node] || [];
-          for (const edge of edges) {
-            const edgeKey = `${node}-${edge.to}-${edge.edgeIndex}`;
-            if (visitedEdges.has(edgeKey) || (edge.to === startNode && currentPath.length === 0) || (visitedNodes.has(edge.to) && edge.to !== startNode)) continue;
-            
-            visitedEdges.add(edgeKey);
-            currentPath.push({ from: node, to: edge.to });
-            transfers.push(edge.originalTransfer);
-            
-            dfsCircular(edge.to, currentPath, Math.min(minFlow, edge.flow), transfers, new Set(visitedEdges), new Set(visitedNodes));
-            
-            currentPath.pop();
-            transfers.pop();
-            visitedEdges.delete(edgeKey);
-          }
-          visitedNodes.delete(node);
-        };
-        dfsCircular(startNode, [], Infinity, [], new Set(), new Set());
-      };
-      findCircularPaths(sourceAddress);
-    } else if (sourceAddress && sinkAddress) {
-      const dfs = (node, target, currentPath, minFlow, transfers, visitedEdges = new Set()) => {
-        if (paths.length >= MAX_PATHS || currentPath.length > MAX_PATH_LENGTH) return;
-        
-        if (node === target && currentPath.length > 0) {
-          paths.push({ path: [...currentPath], flow: minFlow, transfers: [...transfers] });
-          return;
-        }
-        
-        const edges = graph[node] || [];
-        for (const edge of edges) {
-          const edgeKey = `${node}-${edge.to}-${edge.edgeIndex}`;
-          if (!visitedEdges.has(edgeKey)) {
-            const isRevisitingNonTarget = currentPath.some(p => p.to === edge.to) && edge.to !== target;
-            if (!isRevisitingNonTarget) {
-              visitedEdges.add(edgeKey);
-              currentPath.push({ from: node, to: edge.to });
-              transfers.push(edge.originalTransfer);
-              dfs(edge.to, target, currentPath, Math.min(minFlow, edge.flow), transfers, visitedEdges);
-              currentPath.pop();
-              transfers.pop();
-              visitedEdges.delete(edgeKey);
-            }
-          }
-        }
-      };
-      dfs(sourceAddress, sinkAddress, [], Infinity, [], new Set());
-    }
-    
-    // Post-validation is still a good safety net
-    if (sourceAddress === sinkAddress) {
-      const validPaths = paths.filter(p => {
-        if (p.path.length === 0) return false;
-        const firstFrom = p.path[0].from;
-        const lastTo = p.path[p.path.length - 1].to;
-        return firstFrom === sourceAddress && lastTo === sourceAddress;
-      });
-      paths.length = 0;
-      paths.push(...validPaths);
-    }
-    
-    // Group paths by flow amount
-    const pathsByFlow = {};
-    paths.forEach(({ path, flow, transfers }) => {
-      const flowKey = flow.toFixed(6);
-      if (!pathsByFlow[flowKey]) {
-        pathsByFlow[flowKey] = { flow: flow, paths: [], transfers: [], totalFlow: 0 };
-      }
-      pathsByFlow[flowKey].paths.push(path);
-      pathsByFlow[flowKey].transfers.push(transfers);
-      pathsByFlow[flowKey].totalFlow += flow;
-    });
-    
-    const distinctPaths = Object.values(pathsByFlow)
-      .map(group => ({
-        flow: group.flow,
-        pathCount: group.paths.length,
-        totalFlow: group.totalFlow,
-        examplePath: group.paths[0],
-        allTransfers: group.transfers
-      }))
-      .sort((a, b) => b.flow - a.flow);
+    // Use the new Graphology-based computation
+    const distinctPaths = computeDistinctPathsForVisualization(
+      pathData.transfers, 
+      sourceAddress, 
+      sinkAddress
+    );
     
     const totalFlow = distinctPaths.reduce((sum, p) => sum + p.totalFlow, 0);
     
@@ -184,14 +76,23 @@ export default createMetric({
       p.percentage = totalFlow > 0 ? ((p.totalFlow / totalFlow * 100).toFixed(2)) : '0';
     });
     
-    const truncatedMessage = paths.length >= MAX_PATHS ? ` (truncated at ${MAX_PATHS} paths)` : '';
+    const totalPaths = distinctPaths.reduce((sum, p) => sum + p.pathCount, 0);
+    
+    // Store visualization data
+    const visualizationData = {
+      distinctPaths: distinctPaths.slice(0, 100),
+      sourceAddress,
+      sinkAddress,
+      totalFlow
+    };
     
     return createMetricResult({
       value: distinctPaths.length,
       description: `${distinctPaths.length} distinct flow amounts found`,
-      details: `Total paths: ${paths.length}${truncatedMessage}, Total flow: ${totalFlow.toFixed(2)} CRC`,
-      pathData: distinctPaths.slice(0, 10),
-      fullPathData: distinctPaths
+      details: `Total paths: ${totalPaths}, Total flow: ${totalFlow.toFixed(2)} CRC`,
+      pathData: distinctPaths.slice(0, 100),
+      fullPathData: distinctPaths,
+      visualization: visualizationData
     });
   },
   
@@ -208,6 +109,17 @@ export default createMetric({
       );
     }
     
+    // Check if visualization data exists
+    if (!result || !result.visualization || !result.visualization.distinctPaths) {
+      return (
+        <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center text-gray-500">
+          <p>No path data available</p>
+        </div>
+      );
+    }
+    
+    const { distinctPaths, sourceAddress, sinkAddress } = result.visualization;
+    
     const clearAllHighlights = () => {
       // Clear Cytoscape highlights
       if (window.getCyInstance) {
@@ -219,7 +131,7 @@ export default createMetric({
         }
       }
       
-      // Clear Sankey highlights - ADDED THIS
+      // Clear Sankey highlights
       if (window._sankeyInstance && window._sankeyRef && window._sankeyRef.current) {
         if (window._sankeyRef.current.clearHighlight) {
           window._sankeyRef.current.clearHighlight();
@@ -244,126 +156,24 @@ export default createMetric({
       return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
     
-    // Re-apply the same corrected logic in the visualize function
-    const fromSet = new Set();
-    const toSet = new Set();
-    pathData.transfers.forEach(t => {
-      fromSet.add(t.from.toLowerCase());
-      toSet.add(t.to.toLowerCase());
-    });
-    const onlySourceAddresses = [...fromSet].filter(addr => !toSet.has(addr));
-    const onlySinkAddresses = [...toSet].filter(addr => !fromSet.has(addr));
+    // Transform for chart
+    const chartData = distinctPaths
+      .map((group, index) => ({
+        name: `${group.flow.toFixed(2)} CRC`,
+        paths: group.pathCount,
+        percentage: parseFloat(group.percentage),
+        flow: group.flow,
+        transferSets: group.allTransfers,
+        index: index
+      }));
     
-    let sourceAddress, sinkAddress;
-    if (onlySourceAddresses.length === 0 && onlySinkAddresses.length === 0) {
-      sourceAddress = pathData.transfers[0]?.from.toLowerCase();
-      sinkAddress = sourceAddress;
-    } else {
-      sourceAddress = onlySourceAddresses[0] || pathData.transfers[0]?.from.toLowerCase();
-      sinkAddress = onlySinkAddresses[0] || pathData.transfers[pathData.transfers.length - 1]?.to.toLowerCase();
+    if (chartData.length === 0) {
+      return (
+        <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center text-gray-500">
+          <p>No distinct paths found</p>
+        </div>
+      );
     }
-
-    const graph = {};
-    pathData.transfers.forEach((transfer, transferIndex) => {
-        const from = transfer.from.toLowerCase();
-        const to = transfer.to.toLowerCase();
-        const flow = Number(transfer.value) / 1e18;
-        if (!graph[from]) graph[from] = [];
-        graph[from].push({ to, flow, originalTransfer: transfer, edgeIndex: transferIndex });
-    });
-
-    const paths = []; // This will be repopulated by the logic below
-
-    if (sourceAddress && sourceAddress === sinkAddress) {
-        const findCircularPaths = (startNode) => {
-            const dfsCircular = (node, currentPath, minFlow, transfers, visitedEdges = new Set(), visitedNodes = new Set()) => {
-                if (currentPath.length > 20) return;
-                if (node === startNode && currentPath.length > 0) {
-                    paths.push({ path: [...currentPath], flow: minFlow, transfers: [...transfers] });
-                    return;
-                }
-                if (visitedNodes.has(node) && node !== startNode) return;
-                visitedNodes.add(node);
-                const edges = graph[node] || [];
-                for (const edge of edges) {
-                    const edgeKey = `${node}-${edge.to}-${edge.edgeIndex}`;
-                    if (visitedEdges.has(edgeKey) || (edge.to === startNode && currentPath.length === 0) || (visitedNodes.has(edge.to) && edge.to !== startNode)) continue;
-                    visitedEdges.add(edgeKey);
-                    currentPath.push({ from: node, to: edge.to });
-                    transfers.push(edge.originalTransfer);
-                    dfsCircular(edge.to, currentPath, Math.min(minFlow, edge.flow), transfers, new Set(visitedEdges), new Set(visitedNodes));
-                    currentPath.pop();
-                    transfers.pop();
-                    visitedEdges.delete(edgeKey);
-                }
-                visitedNodes.delete(node);
-            };
-            dfsCircular(startNode, [], Infinity, [], new Set(), new Set());
-        };
-        findCircularPaths(sourceAddress);
-    } else if (sourceAddress && sinkAddress) {
-        const dfs = (node, target, currentPath, minFlow, transfers, visitedEdges = new Set()) => {
-            if (node === target && currentPath.length > 0) {
-                paths.push({ path: [...currentPath], flow: minFlow, transfers: [...transfers] });
-                return;
-            }
-            const edges = graph[node] || [];
-            for (const edge of edges) {
-                const edgeKey = `${node}-${edge.to}-${edge.edgeIndex}`;
-                if (!visitedEdges.has(edgeKey)) {
-                    const isRevisitingNonTarget = currentPath.some(p => p.to === edge.to) && edge.to !== target;
-                    if (!isRevisitingNonTarget) {
-                        visitedEdges.add(edgeKey);
-                        currentPath.push({ from: node, to: edge.to });
-                        transfers.push(edge.originalTransfer);
-                        dfs(edge.to, target, currentPath, Math.min(minFlow, edge.flow), transfers, visitedEdges);
-                        currentPath.pop();
-                        transfers.pop();
-                        visitedEdges.delete(edgeKey);
-                    }
-                }
-            }
-        };
-        dfs(sourceAddress, sinkAddress, [], Infinity, [], new Set());
-    }
-    if (sourceAddress === sinkAddress) {
-        const validPaths = paths.filter(p => {
-            if (p.path.length === 0) return false;
-            const firstFrom = p.path[0].from;
-            const lastTo = p.path[p.path.length - 1].to;
-            return firstFrom === sourceAddress && lastTo === sourceAddress;
-        });
-        paths.length = 0;
-        paths.push(...validPaths);
-    }
-    
-    const pathsByFlow = {};
-    paths.forEach(({ path, flow, transfers }) => {
-      const flowKey = flow.toFixed(6);
-      if (!pathsByFlow[flowKey]) {
-        pathsByFlow[flowKey] = { flow, count: 0, totalFlow: 0, transferSets: [] };
-      }
-      pathsByFlow[flowKey].count++;
-      pathsByFlow[flowKey].totalFlow += flow;
-      pathsByFlow[flowKey].transferSets.push(transfers);
-    });
-
-    const chartData = Object.values(pathsByFlow)
-      .sort((a, b) => b.flow - a.flow)
-      .slice(0, 10)
-      .map((group, index) => {
-        const totalFlow = Object.values(pathsByFlow).reduce((sum, g) => sum + g.totalFlow, 0);
-        return {
-          name: `${group.flow.toFixed(2)} CRC`,
-          paths: group.count,
-          percentage: totalFlow > 0 ? parseFloat(((group.totalFlow / totalFlow) * 100).toFixed(2)) : 0,
-          flow: group.flow,
-          transferSets: group.transferSets,
-          index: index
-        };
-      });
-    
-    if (chartData.length === 0) return null;
     
     const handleBarClick = (data, index) => {
       if (!data || !data.transferSets || data.transferSets.length === 0) {
@@ -393,6 +203,8 @@ export default createMetric({
       setSelectedBar(index);
 
       const transfersToShow = data.transferSets[nextIndex];
+      console.log('Transfers to highlight:', transfersToShow);
+      
       if (typeof window.highlightPath === 'function') {
         window.highlightPath(transfersToShow);
         console.log(`Showing path ${nextIndex + 1} of ${data.transferSets.length} for flow ${data.flow.toFixed(2)} CRC`);
@@ -422,7 +234,7 @@ export default createMetric({
     return (
       <div className="mt-4">
         <div className="mb-2 text-sm text-gray-600">
-          Top 10 flow amounts by percentage of total flow (click bars to explore paths, click again to cycle):
+          Top 100 flow amounts by percentage of total flow (click bars to explore paths, click again to cycle):
         </div>
         {selectedFlowKey && (
           <div className="mb-2 text-xs text-blue-600">

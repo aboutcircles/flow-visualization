@@ -8,12 +8,13 @@ import {
   Maximize, 
   Move,
   Layers,
-  GitBranch
+  GitBranch,
+  X
 } from 'lucide-react';
 
 const CytoscapeVisualization = forwardRef(({ 
   pathData,
-  formData, // Add formData prop
+  formData,
   wrappedTokens,
   nodeProfiles,
   tokenOwnerProfiles,
@@ -27,6 +28,7 @@ const CytoscapeVisualization = forwardRef(({
   const containerRef = useRef(null);
   const [tooltip, setTooltip] = useState({ text: '', position: null });
   const [layoutName, setLayoutName] = useState('klay');
+  const [highlightedPath, setHighlightedPath] = useState(null);
   const { config } = usePerformance();
   
   const { 
@@ -36,11 +38,12 @@ const CytoscapeVisualization = forwardRef(({
     zoomIn,
     zoomOut,
     fit,
-    center
+    center,
+    highlightPath: cytoscapeHighlightPath
   } = useCytoscape({
     containerRef,
     pathData,
-    formData, // Pass formData to hook
+    formData,
     wrappedTokens,
     nodeProfiles,
     tokenOwnerProfiles,
@@ -52,6 +55,24 @@ const CytoscapeVisualization = forwardRef(({
     layoutName
   });
 
+  // Enhanced highlightPath that also updates local state
+  const highlightPath = useCallback((transfers) => {
+    console.log('CytoscapeVisualization: highlightPath called with:', transfers);
+    cytoscapeHighlightPath(transfers);
+    setHighlightedPath(transfers);
+  }, [cytoscapeHighlightPath]);
+
+  // Clear highlight function
+  const clearHighlight = useCallback(() => {
+    const cy = cyRef.current;
+    if (cy) {
+      cy.batch(() => {
+        cy.elements().removeClass('path-highlighted path-node');
+      });
+    }
+    setHighlightedPath(null);
+  }, [cyRef]);
+
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     cyRef,
@@ -62,58 +83,8 @@ const CytoscapeVisualization = forwardRef(({
     center,
     runLayout,
     highlightTransaction,
-    highlightPath: (transfers) => {
-      const cy = cyRef.current;
-      if (!cy || !transfers || transfers.length === 0) return;
-      
-      console.log('Highlighting path with transfers:', transfers);
-      
-      cy.batch(() => {
-        // Clear existing highlights
-        cy.elements().removeClass('path-highlighted path-node');
-        
-        const nodesToHighlight = new Set();
-        const transferIndices = new Set();
-        
-        // First, we need to match the transfers to the original pathData transfers
-        // to get their indices
-        transfers.forEach(transfer => {
-          // Find the matching transfer in the original pathData
-          const originalTransfers = window._pathData?.transfers || [];
-          
-          originalTransfers.forEach((origTransfer, index) => {
-            if (
-              origTransfer.from.toLowerCase() === transfer.from.toLowerCase() &&
-              origTransfer.to.toLowerCase() === transfer.to.toLowerCase() &&
-              origTransfer.tokenOwner.toLowerCase() === transfer.tokenOwner.toLowerCase() &&
-              origTransfer.value === transfer.value
-            ) {
-              transferIndices.add(index);
-              nodesToHighlight.add(transfer.from.toLowerCase());
-              nodesToHighlight.add(transfer.to.toLowerCase());
-            }
-          });
-        });
-        
-        console.log('Transfer indices to highlight:', Array.from(transferIndices));
-        
-        // Highlight edges by their transfer index
-        cy.edges().forEach(edge => {
-          const transferIndex = edge.data('transferIndex');
-          if (transferIndices.has(transferIndex)) {
-            edge.addClass('path-highlighted');
-          }
-        });
-        
-        // Highlight nodes
-        nodesToHighlight.forEach(nodeId => {
-          const node = cy.getElementById(nodeId);
-          if (node && node.length > 0) {
-            node.addClass('path-node');
-          }
-        });
-      });
-    }
+    highlightPath,
+    clearHighlight
   }));
 
   // Highlight selected transaction
@@ -133,6 +104,18 @@ const CytoscapeVisualization = forwardRef(({
       runLayout(newLayout);
     }
   };
+
+  // Handle escape key to clear highlight
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && highlightedPath) {
+        clearHighlight();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [highlightedPath, clearHighlight]);
 
   return (
     <div className="relative w-full h-full">
@@ -196,9 +179,28 @@ const CytoscapeVisualization = forwardRef(({
             </select>
           </div>
         </div>
-        
-
       </div>
+      
+      {/* Highlight indicator */}
+      {highlightedPath && (
+        <div className="absolute top-4 right-4 z-20 bg-white rounded-lg shadow-sm p-2">
+          <div className="flex items-center gap-2 text-sm">
+            <div className="w-3 h-3 bg-red-600 rounded-full"></div>
+            <span>Path highlighted</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={clearHighlight}
+              className="p-1 h-auto"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {highlightedPath.length} transfer{highlightedPath.length > 1 ? 's' : ''} • ESC to clear
+          </div>
+        </div>
+      )}
       
       {/* Tooltip */}
       {tooltip.text && tooltip.position && (

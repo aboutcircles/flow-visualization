@@ -8,7 +8,8 @@ import {
   Maximize, 
   Move,
   Filter,
-  Layers
+  Layers,
+  X
 } from 'lucide-react';
 import * as SliderPrimitive from '@radix-ui/react-slider';
 
@@ -26,6 +27,7 @@ const SankeyVisualization = forwardRef(({
 }, ref) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
+  const isInitializingRef = useRef(false);
   const { config } = usePerformance();
   const [flowThreshold, setFlowThreshold] = useState(0);
   const [renderingStrategy, setRenderingStrategy] = useState('standard');
@@ -50,27 +52,23 @@ const SankeyVisualization = forwardRef(({
     return `hsl(${hue}, 70%, 50%)`;
   }, []);
 
-  // Expose methods to parent component
-  useImperativeHandle(ref, () => ({
-    chartInstance,
-    highlightPath: (transfers) => {
-      if (!chartInstance.current || !transfers || transfers.length === 0) {
-        clearHighlight();
-        return;
-      }
-      
-      console.log('Sankey: Highlighting path with transfers:', transfers);
-      setHighlightedPath(transfers);
-    },
-    clearHighlight: () => {
-      setHighlightedPath(null);
-    }
-  }));
-
   // Clear highlight function
   const clearHighlight = useCallback(() => {
     setHighlightedPath(null);
   }, []);
+
+  // Enhanced highlightPath that updates local state (same pattern as graph)
+  const highlightPath = useCallback((transfers) => {
+    console.log('SankeyVisualization: highlightPath called with:', transfers);
+    setHighlightedPath(transfers);
+  }, []);
+
+  // Expose methods to parent component
+  useImperativeHandle(ref, () => ({
+    chartInstance,
+    highlightPath,
+    clearHighlight
+  }));
 
   // Determine rendering strategy based on graph size
   const determineRenderingStrategy = useCallback((nodeCount, edgeCount) => {
@@ -84,13 +82,35 @@ const SankeyVisualization = forwardRef(({
     return 'standard';
   }, []);
 
-  // Transform path data to Sankey format with token splitting
-  const transformToSankeyData = useCallback((pathData, formData, strategy) => {
-    if (!pathData || !pathData.transfers || pathData.transfers.length === 0) {
-      return { nodes: [], links: [], strategy: 'standard' };
+  // Initialize and update chart when data or highlights change
+  useEffect(() => {
+    if (!chartRef.current || !pathData) return;
+    
+    // Skip if already initializing
+    if (isInitializingRef.current) return;
+    
+    isInitializingRef.current = true;
+
+    // Initialize ECharts instance if needed
+    if (!chartInstance.current) {
+      chartInstance.current = echarts.init(chartRef.current, null, {
+        renderer: 'canvas',
+        width: 'auto',
+        height: 'auto'
+      });
+      
+      // Store instance globally
+      window._sankeyInstance = chartInstance.current;
+      window._sankeyRef = ref;
     }
 
-    // Normalize addresses
+    // Determine strategy
+    const nodeCount = new Set(pathData.transfers.map(t => [t.from.toLowerCase(), t.to.toLowerCase()]).flat()).size;
+    const edgeCount = pathData.transfers.length;
+    const strategy = determineRenderingStrategy(nodeCount, edgeCount);
+    setRenderingStrategy(strategy);
+
+    // Transform data
     const transfers = pathData.transfers.map(t => ({
       ...t,
       from: t.from.toLowerCase(),
@@ -98,14 +118,42 @@ const SankeyVisualization = forwardRef(({
       tokenOwner: t.tokenOwner.toLowerCase()
     }));
 
-    // Filter by capacity range only
+    // Filter by capacity range
     const filteredTransfers = transfers.filter(t => {
       const flowValue = Number(t.value) / 1e18;
       return flowValue >= minCapacity && flowValue <= maxCapacity;
     });
 
     if (filteredTransfers.length === 0) {
-      return { nodes: [], links: [], strategy };
+      chartInstance.current.clear();
+      isInitializingRef.current = false;
+      return;
+    }
+
+    // Build nodes and determine highlighting
+    const allNodes = new Set();
+    const highlightedNodes = new Set();
+    const highlightedEdges = new Set();
+    
+    filteredTransfers.forEach(transfer => {
+      allNodes.add(transfer.from);
+      allNodes.add(transfer.to);
+    });
+
+    // Check which transfers and nodes should be highlighted
+    if (highlightedPath && highlightedPath.length > 0) {
+      highlightedPath.forEach(highlightTransfer => {
+        const from = highlightTransfer.from.toLowerCase();
+        const to = highlightTransfer.to.toLowerCase();
+        const token = highlightTransfer.tokenOwner.toLowerCase();
+        
+        highlightedNodes.add(from);
+        highlightedNodes.add(to);
+        
+        // Create edge key for matching
+        const edgeKey = `${from}-${to}-${token}`;
+        highlightedEdges.add(edgeKey);
+      });
     }
 
     // Determine source and sink
@@ -117,339 +165,64 @@ const SankeyVisualization = forwardRef(({
       toSet.add(t.to);
     });
 
-    // Find addresses that only appear as source or only as sink
     const onlySourceAddresses = [...fromSet].filter(addr => !toSet.has(addr));
     const onlySinkAddresses = [...toSet].filter(addr => !fromSet.has(addr));
 
     let sourceAddress, sinkAddress;
     
-    // Use form data if available
     if (formData?.From && formData?.To) {
       sourceAddress = formData.From.toLowerCase();
       sinkAddress = formData.To.toLowerCase();
-    } else if (onlySourceAddresses.length === 0 && onlySinkAddresses.length === 0) {
-      sourceAddress = filteredTransfers[0]?.from;
-      sinkAddress = filteredTransfers[filteredTransfers.length - 1]?.to;
     } else {
       sourceAddress = onlySourceAddresses[0] || filteredTransfers[0]?.from;
       sinkAddress = onlySinkAddresses[0] || filteredTransfers[filteredTransfers.length - 1]?.to;
     }
 
-    const isSelfTransfer = sourceAddress === sinkAddress;
-
-    // Build graph structure for depth calculation
-    const graph = {};
-    const reverseGraph = {};
-    const allNodes = new Set();
-    
-    filteredTransfers.forEach(transfer => {
-      allNodes.add(transfer.from);
-      allNodes.add(transfer.to);
-      
-      if (!graph[transfer.from]) graph[transfer.from] = new Set();
-      if (!reverseGraph[transfer.to]) reverseGraph[transfer.to] = new Set();
-      
-      graph[transfer.from].add(transfer.to);
-      reverseGraph[transfer.to].add(transfer.from);
-    });
-
-    // Calculate depths using BFS
-    const depths = {};
-    const calculateDepths = () => {
-      const queue = [sourceAddress];
-      depths[sourceAddress] = 0;
-      const visited = new Set([sourceAddress]);
-      
-      while (queue.length > 0) {
-        const current = queue.shift();
-        const currentDepth = depths[current];
-        
-        const neighbors = graph[current] || new Set();
-        neighbors.forEach(neighbor => {
-          if (!visited.has(neighbor)) {
-            visited.add(neighbor);
-            depths[neighbor] = currentDepth + 1;
-            queue.push(neighbor);
-          }
-        });
-      }
-      
-      // Handle unvisited nodes
-      const unvisited = [...allNodes].filter(node => !visited.has(node));
-      if (unvisited.length > 0) {
-        // Calculate from sink backwards
-        const backwardQueue = [sinkAddress];
-        const backwardDepths = { [sinkAddress]: 0 };
-        const backwardVisited = new Set([sinkAddress]);
-        
-        while (backwardQueue.length > 0) {
-          const current = backwardQueue.shift();
-          const currentDepth = backwardDepths[current];
-          
-          const neighbors = reverseGraph[current] || new Set();
-          neighbors.forEach(neighbor => {
-            if (!backwardVisited.has(neighbor)) {
-              backwardVisited.add(neighbor);
-              backwardDepths[neighbor] = currentDepth + 1;
-              backwardQueue.push(neighbor);
-            }
-          });
-        }
-        
-        const maxForwardDepth = Math.max(...Object.values(depths));
-        unvisited.forEach(node => {
-          if (backwardDepths[node] !== undefined) {
-            depths[node] = maxForwardDepth + 1 + backwardDepths[node];
-          } else {
-            depths[node] = Math.floor(maxForwardDepth / 2);
-          }
-        });
-      }
-    };
-    
-    calculateDepths();
-
-    // Ensure sink is at maximum depth
-    const maxDepth = Math.max(...Object.values(depths), 0);
-    if (!isSelfTransfer && depths[sinkAddress] < maxDepth) {
-      depths[sinkAddress] = maxDepth;
-    }
-
-    // For aggregated strategy, group nodes by depth
-    if (strategy === 'aggregated' && showAggregated) {
-      const depthGroups = {};
-      const nodesByDepth = {};
-      
-      allNodes.forEach(node => {
-        const depth = depths[node] || 0;
-        if (!nodesByDepth[depth]) {
-          nodesByDepth[depth] = [];
-        }
-        nodesByDepth[depth].push(node);
-      });
-
-      // Create aggregated nodes for each depth level
-      const aggregatedNodes = [];
-      const nodeMapping = {};
-      
-      Object.entries(nodesByDepth).forEach(([depth, nodes]) => {
-        const depthInt = parseInt(depth);
-        const aggregatedId = `depth_${depth}`;
-        
-        // Special handling for source and sink depths
-        if (nodes.includes(sourceAddress) && nodes.length === 1) {
-          aggregatedNodes.push({
-            name: sourceAddress,
-            realAddress: sourceAddress,
-            itemStyle: { color: '#3B82F6' }
-          });
-          nodeMapping[sourceAddress] = sourceAddress;
-        } else if (nodes.includes(sinkAddress) && nodes.length === 1) {
-          aggregatedNodes.push({
-            name: sinkAddress,
-            realAddress: sinkAddress,
-            itemStyle: { color: '#EF4444' }
-          });
-          nodeMapping[sinkAddress] = sinkAddress;
-        } else {
-          aggregatedNodes.push({
-            name: aggregatedId,
-            realAddress: `Level ${depthInt} (${nodes.length} nodes)`,
-            itemStyle: { color: '#9CA3AF' }
-          });
-          nodes.forEach(node => {
-            nodeMapping[node] = aggregatedId;
-          });
-        }
-      });
-
-      // Create aggregated links
-      const aggregatedLinkMap = {};
-      
-      filteredTransfers.forEach(transfer => {
-        const sourceNode = nodeMapping[transfer.from];
-        const targetNode = nodeMapping[transfer.to];
-        
-        if (sourceNode !== targetNode) {
-          const linkKey = `${sourceNode}-${targetNode}`;
-          if (!aggregatedLinkMap[linkKey]) {
-            aggregatedLinkMap[linkKey] = {
-              source: sourceNode,
-              target: targetNode,
-              value: 0,
-              transfers: [],
-              tokens: new Set()
-            };
-          }
-          
-          const flowValue = Number(transfer.value) / 1e18;
-          aggregatedLinkMap[linkKey].value += flowValue;
-          aggregatedLinkMap[linkKey].transfers.push(transfer);
-          aggregatedLinkMap[linkKey].tokens.add(transfer.tokenOwner);
-        }
-      });
-
-      const aggregatedLinks = Object.values(aggregatedLinkMap).map(link => ({
-        ...link,
-        lineStyle: {
-          color: link.tokens.size > 1 ? '#9333EA' : '#94A3B8',
-          opacity: 0.6
-        }
-      }));
-
-      return { nodes: aggregatedNodes, links: aggregatedLinks, strategy };
-    }
-
-    // Create nodes array
-    const nodeMap = {};
-    const nodes = [];
-    
-    if (isSelfTransfer) {
-      // For self-transfer, create two logical nodes
-      const sourceNodeId = `${sourceAddress}_source`;
-      nodes.push({
-        name: sourceNodeId,
-        realAddress: sourceAddress,
-        itemStyle: { color: '#e0f63b' }
-      });
-      nodeMap[sourceAddress + '_start'] = sourceNodeId;
-      
-      const sinkNodeId = `${sinkAddress}_sink`;
-      nodes.push({
-        name: sinkNodeId,
-        realAddress: sinkAddress,
-        itemStyle: { color: '#e0f63b' }
-      });
-      nodeMap[sinkAddress + '_end'] = sinkNodeId;
-      
-      allNodes.forEach(addr => {
-        if (addr !== sourceAddress) {
-          nodes.push({
-            name: addr,
-            realAddress: addr,
-            itemStyle: { color: '#CBD5E1' }
-          });
-          nodeMap[addr] = addr;
-        }
-      });
-    } else {
-      allNodes.forEach(addr => {
-        let color = '#CBD5E1';
-        if (addr === sourceAddress) {
-          color = '#3B82F6';
-        } else if (addr === sinkAddress) {
-          color = '#EF4444';
-        }
-        
-        nodes.push({
-          name: addr,
-          realAddress: addr,
-          itemStyle: { color }
-        });
-        nodeMap[addr] = addr;
-      });
-    }
-
-    // Create individual links for each token transfer (no aggregation)
-    const links = filteredTransfers.map((transfer, index) => {
-      let sourceNode, targetNode;
-      
-      if (isSelfTransfer) {
-        // For self-transfer, always use the logical source and sink nodes
-        sourceNode = `${sourceAddress}_source`;
-        targetNode = `${sinkAddress}_sink`;
-        
-        // Unless this transfer is between other addresses in the path
-        if (transfer.from !== sourceAddress || transfer.to !== sinkAddress) {
-          // Check if this is an intermediate transfer
-          const isFromSource = transfer.from === sourceAddress;
-          const isToSink = transfer.to === sinkAddress;
-          
-          if (isFromSource) {
-            sourceNode = `${sourceAddress}_source`;
-            targetNode = nodeMap[transfer.to] || transfer.to;
-          } else if (isToSink) {
-            sourceNode = nodeMap[transfer.from] || transfer.from;
-            targetNode = `${sinkAddress}_sink`;
-          } else {
-            // Neither from source nor to sink, just normal nodes
-            sourceNode = nodeMap[transfer.from] || transfer.from;
-            targetNode = nodeMap[transfer.to] || transfer.to;
-          }
-        }
-      } else {
-        sourceNode = nodeMap[transfer.from] || transfer.from;
-        targetNode = nodeMap[transfer.to] || transfer.to;
-      }
-
-      const flowValue = Number(transfer.value) / 1e18;
-      const isWrapped = wrappedTokens.includes(transfer.tokenOwner);
-      
-      // Check if this transfer is part of the highlighted path
-      let isHighlighted = false;
-      if (highlightedPath && highlightedPath.length > 0) {
-        isHighlighted = highlightedPath.some(highlightTransfer => 
-          highlightTransfer.from.toLowerCase() === transfer.from.toLowerCase() &&
-          highlightTransfer.to.toLowerCase() === transfer.to.toLowerCase() &&
-          highlightTransfer.tokenOwner.toLowerCase() === transfer.tokenOwner.toLowerCase() &&
-          highlightTransfer.value === transfer.value
-        );
+    // Create nodes
+    const nodes = Array.from(allNodes).map(addr => {
+      let color = '#CBD5E1';
+      if (addr === sourceAddress) {
+        color = highlightedNodes.has(addr) ? '#60A5FA' : '#3B82F6';
+      } else if (addr === sinkAddress) {
+        color = highlightedNodes.has(addr) ? '#F87171' : '#EF4444';
+      } else if (highlightedNodes.has(addr)) {
+        color = '#E5E7EB';
       }
       
       return {
-        source: sourceNode,
-        target: targetNode,
+        name: addr,
+        realAddress: addr,
+        itemStyle: { 
+          color,
+          borderColor: highlightedNodes.has(addr) ? '#DC2626' : undefined,
+          borderWidth: highlightedNodes.has(addr) ? 3 : 0
+        }
+      };
+    });
+
+    // Create links
+    const links = filteredTransfers.map((transfer, index) => {
+      const flowValue = Number(transfer.value) / 1e18;
+      const isWrapped = wrappedTokens.includes(transfer.tokenOwner);
+      const edgeKey = `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`;
+      const isHighlighted = highlightedEdges.has(edgeKey);
+      
+      return {
+        source: transfer.from,
+        target: transfer.to,
         value: flowValue,
         tokenOwner: transfer.tokenOwner,
         transferIndex: index,
         originalTransfer: transfer,
-        isHighlighted: isHighlighted,
         lineStyle: {
           color: isHighlighted ? '#DC2626' : getTokenColor(transfer.tokenOwner),
           opacity: highlightedPath ? (isHighlighted ? 0.9 : 0.1) : 0.6,
           type: isWrapped ? 'dashed' : 'solid',
           width: isHighlighted ? 3 : undefined
-        },
-        emphasis: {
-          lineStyle: {
-            opacity: 1
-          }
         }
       };
     });
 
-    return { nodes, links, strategy };
-  }, [minCapacity, maxCapacity, wrappedTokens, showAggregated, getTokenColor, highlightedPath]);
-
-  // Initialize and update chart
-  useEffect(() => {
-    if (!chartRef.current || !pathData) return;
-
-    // Initialize ECharts instance
-    if (!chartInstance.current) {
-      chartInstance.current = echarts.init(chartRef.current, null, {
-        renderer: 'canvas',
-        width: 'auto',
-        height: 'auto'
-      });
-    }
-
-    const nodeCount = new Set(pathData.transfers.map(t => [t.from.toLowerCase(), t.to.toLowerCase()]).flat()).size;
-    const edgeCount = pathData.transfers.length;
-    const strategy = determineRenderingStrategy(nodeCount, edgeCount);
-    setRenderingStrategy(strategy);
-
-    const { nodes, links } = transformToSankeyData(pathData, formData, strategy);
-
-    if (nodes.length === 0) {
-      chartInstance.current.clear();
-      return;
-    }
-
-    // Calculate dynamic sizing
-    const isLarge = strategy === 'medium' || strategy === 'compact' || strategy === 'aggregated';
-    const isVeryLarge = strategy === 'compact' || strategy === 'aggregated';
-    
     // Dynamic parameters based on strategy
     let nodeGap, nodeWidth, fontSize, layoutIterations, showLabels;
     
@@ -475,7 +248,7 @@ const SankeyVisualization = forwardRef(({
         layoutIterations = 16;
         showLabels = true;
         break;
-      default: // standard
+      default:
         nodeGap = 5;
         nodeWidth = 15;
         fontSize = 9;
@@ -496,17 +269,14 @@ const SankeyVisualization = forwardRef(({
         label: {
           show: showLabels && config.rendering.features.nodeLabels,
           formatter: label,
-          fontSize: fontSize,
-          overflow: 'truncate',
-          ellipsis: '...',
-          width: strategy === 'aggregated' ? 100 : 60
+          fontSize: fontSize
         }
       };
     });
 
     const option = {
-      animation: !isLarge,
-      animationDuration: isLarge ? 0 : 300,
+      animation: true,
+      animationDuration: 300,
       tooltip: {
         trigger: 'item',
         triggerOn: 'mousemove',
@@ -514,12 +284,6 @@ const SankeyVisualization = forwardRef(({
         formatter: function(params) {
           if (params.dataType === 'node') {
             const addr = params.data.realAddress;
-            
-            // For aggregated nodes
-            if (addr.startsWith('Level')) {
-              return addr;
-            }
-            
             const profile = nodeProfiles[addr];
             const balanceMap = balancesByAccount[addr] || {};
             const totalCrc = Object.values(balanceMap).reduce((sum, e) => sum + (e.crc || 0), 0);
@@ -537,16 +301,12 @@ const SankeyVisualization = forwardRef(({
             return tooltipHtml;
           } else if (params.dataType === 'edge') {
             const link = params.data;
-            
             let tooltipHtml = `<strong>Flow: ${link.value.toFixed(6)} CRC</strong><br/>`;
             
             if (link.tokenOwner) {
               const tokenProfile = tokenOwnerProfiles[link.tokenOwner];
               const tokenName = tokenProfile?.name || link.tokenOwner.slice(0, 8) + '...';
               tooltipHtml += `Token: ${tokenName}<br/>`;
-            } else if (link.tokens) {
-              tooltipHtml += `Tokens: ${link.tokens.size}<br/>`;
-              tooltipHtml += `Transfers: ${link.transfers.length}<br/>`;
             }
             
             return tooltipHtml;
@@ -568,31 +328,11 @@ const SankeyVisualization = forwardRef(({
           nodeGap: nodeGap,
           nodeAlign: 'justify',
           draggable: true,
-          focusNodeAdjacency: 'allEdges',
           emphasis: {
-            focus: 'adjacency',
-            blurScope: 'coordinateSystem',
-            itemStyle: {
-              opacity: 1
-            },
-            lineStyle: {
-              opacity: 1
-            }
-          },
-          blur: {
-            itemStyle: {
-              opacity: 0.1
-            },
-            lineStyle: {
-              opacity: 0.1
-            }
+            focus: 'adjacency'
           },
           lineStyle: {
             curveness: 0.5
-          },
-          label: {
-            position: 'right',
-            distance: 5
           }
         }
       ]
@@ -600,27 +340,23 @@ const SankeyVisualization = forwardRef(({
 
     chartInstance.current.setOption(option, true);
 
-    // Store instance globally
-    window._sankeyInstance = chartInstance.current;
-    // Also store the ref for easier access
-    window._sankeyRef = ref;
-
     // Handle click events
+    chartInstance.current.off('click');
     chartInstance.current.on('click', 'series.sankey.edge', function(params) {
       const link = params.data;
       if (link.originalTransfer) {
         const transfer = link.originalTransfer;
         const transactionId = `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`;
         onTransactionSelect(transactionId);
-      } else if (link.transfers && link.transfers.length > 0) {
-        // For aggregated links
-        const transfer = link.transfers[0];
-        const transactionId = `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`;
-        onTransactionSelect(transactionId);
       }
     });
 
-    // Handle resize
+    isInitializingRef.current = false;
+
+  }, [pathData, formData, highlightedPath, minCapacity, maxCapacity, wrappedTokens, nodeProfiles, tokenOwnerProfiles, balancesByAccount, config.rendering.features, getTokenColor, onTransactionSelect, determineRenderingStrategy, ref]);
+
+  // Handle resize
+  useEffect(() => {
     const handleResize = () => {
       if (chartInstance.current) {
         chartInstance.current.resize();
@@ -628,61 +364,24 @@ const SankeyVisualization = forwardRef(({
     };
     
     window.addEventListener('resize', handleResize);
-    
-    setTimeout(handleResize, 100);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
+  // Cleanup
+  useEffect(() => {
     return () => {
-      window.removeEventListener('resize', handleResize);
       if (chartInstance.current) {
-        chartInstance.current.off('click');
+        chartInstance.current.dispose();
+        chartInstance.current = null;
       }
-      if (window._sankeyInstance === chartInstance.current) {
+      if (window._sankeyInstance) {
         window._sankeyInstance = null;
       }
-      if (window._sankeyRef === ref) {
+      if (window._sankeyRef) {
         window._sankeyRef = null;
       }
     };
-  }, [pathData, formData, nodeProfiles, tokenOwnerProfiles, balancesByAccount, config.rendering.features, transformToSankeyData, onTransactionSelect, determineRenderingStrategy, ref]);
-
-  // Highlight selected transaction
-  useEffect(() => {
-    if (!chartInstance.current || !selectedTransactionId) return;
-
-    const strategy = renderingStrategy;
-    const { nodes, links } = transformToSankeyData(pathData, formData, strategy);
-    
-    // Update links with highlight
-    const updatedLinks = links.map(link => {
-      let isSelected = false;
-      
-      if (link.originalTransfer) {
-        const transfer = link.originalTransfer;
-        const tid = `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`;
-        isSelected = tid === selectedTransactionId;
-      } else if (link.transfers) {
-        isSelected = link.transfers.some(t => {
-          const tid = `${t.from}-${t.to}-${t.tokenOwner}`;
-          return tid === selectedTransactionId;
-        });
-      }
-      
-      return {
-        ...link,
-        lineStyle: {
-          ...link.lineStyle,
-          opacity: isSelected ? 1 : 0.2,
-          width: isSelected ? 3 : 1
-        }
-      };
-    });
-
-    chartInstance.current.setOption({
-      series: [{
-        links: updatedLinks
-      }]
-    });
-  }, [selectedTransactionId, pathData, formData, transformToSankeyData, renderingStrategy]);
+  }, []);
 
   // Handle zoom and pan
   useEffect(() => {
@@ -697,12 +396,10 @@ const SankeyVisualization = forwardRef(({
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
       const newScale = Math.max(0.5, Math.min(5, zoom.scale * delta));
       
-      // Calculate zoom center
       const rect = chartRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       
-      // Adjust translation to zoom on mouse position
       const scaleDiff = newScale / zoom.scale;
       const newTranslateX = x - (x - zoom.translateX) * scaleDiff;
       const newTranslateY = y - (y - zoom.translateY) * scaleDiff;
@@ -715,7 +412,7 @@ const SankeyVisualization = forwardRef(({
     };
 
     const handleMouseDown = (e) => {
-      if (e.button === 0 && !e.target.closest('path')) { // Left click, not on a path
+      if (e.button === 0 && !e.target.closest('path')) {
         isPanning = true;
         startX = e.clientX - zoom.translateX;
         startY = e.clientY - zoom.translateY;
@@ -799,7 +496,7 @@ const SankeyVisualization = forwardRef(({
           transform: `translate(${zoom.translateX}px, ${zoom.translateY}px) scale(${zoom.scale})`,
           transformOrigin: '0 0',
           transition: 'none',
-          cursor: isPanning => isPanning ? 'grabbing' : 'grab'
+          cursor: 'grab'
         }}
       />
 
@@ -840,8 +537,6 @@ const SankeyVisualization = forwardRef(({
             <Move className="h-4 w-4" />
           </Button>
         </div>
-
-
       </div>
       
       {/* Highlight indicator */}
@@ -849,7 +544,18 @@ const SankeyVisualization = forwardRef(({
         <div className="absolute top-4 right-4 z-20 bg-white rounded-lg shadow-sm p-2">
           <div className="flex items-center gap-2 text-sm">
             <div className="w-3 h-3 bg-red-600 rounded-full"></div>
-            <span>Path highlighted (ESC to clear)</span>
+            <span>Path highlighted</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={clearHighlight}
+              className="p-1 h-auto"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {highlightedPath.length} transfer{highlightedPath.length > 1 ? 's' : ''} • ESC to clear
           </div>
         </div>
       )}

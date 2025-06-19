@@ -709,6 +709,60 @@ export const useCytoscape = ({
     });
   }, []);
 
+  // Enhanced highlightPath implementation
+  const highlightPath = useCallback((transfers) => {
+    const cy = cyRef.current;
+    if (!cy || !transfers || transfers.length === 0) return;
+    
+    console.log('Cytoscape: Highlighting path with transfers:', transfers);
+    
+    cy.batch(() => {
+      // Clear existing highlights
+      cy.elements().removeClass('path-highlighted path-node');
+      
+      const nodesToHighlight = new Set();
+      const edgesToHighlight = new Set();
+      
+      // For each transfer in the path, find and highlight the corresponding edge
+      transfers.forEach(transfer => {
+        const from = transfer.from.toLowerCase();
+        const to = transfer.to.toLowerCase();
+        const token = transfer.tokenOwner.toLowerCase();
+        
+        // Add nodes to highlight set
+        nodesToHighlight.add(from);
+        nodesToHighlight.add(to);
+        
+        // Find matching edges in the graph
+        cy.edges().forEach(edge => {
+          const data = edge.data();
+          if (
+            data.source === from &&
+            data.target === to &&
+            data.tokenOwner === token
+          ) {
+            edgesToHighlight.add(edge);
+          }
+        });
+      });
+      
+      // Highlight all edges in the path
+      edgesToHighlight.forEach(edge => {
+        edge.addClass('path-highlighted');
+      });
+      
+      // Highlight all nodes in the path
+      nodesToHighlight.forEach(nodeId => {
+        const node = cy.getElementById(nodeId);
+        if (node && node.length > 0) {
+          node.addClass('path-node');
+        }
+      });
+      
+      console.log(`Highlighted ${edgesToHighlight.size} edges and ${nodesToHighlight.size} nodes`);
+    });
+  }, []);
+
   // Layout runner
   const runLayout = useCallback((newLayoutName) => {
     const cy = cyRef.current;
@@ -871,6 +925,7 @@ export const useCytoscape = ({
     zoomIn,
     zoomOut,
     fit,
-    center
+    center,
+    highlightPath
   };
 };
