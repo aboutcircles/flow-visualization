@@ -8,7 +8,12 @@ export function computeFlowPaths(transfers, source, sink) {
   source = source.toLowerCase();
   sink = sink.toLowerCase();
   
-  console.log(`Finding paths from ${source} to ${sink}`);
+  // Check for self-transfer case
+  const isSelfTransfer = source === sink;
+  const virtualSink = isSelfTransfer ? `${sink}_virtual_sink` : null;
+  const effectiveSink = isSelfTransfer ? virtualSink : sink;
+  
+  console.log(`Finding paths from ${source} to ${effectiveSink}${isSelfTransfer ? ' (self-transfer)' : ''}`);
   console.log(`Total transfers: ${transfers.length}`);
   
   // First, build the complete flow network
@@ -17,9 +22,14 @@ export function computeFlowPaths(transfers, source, sink) {
   
   transfers.forEach((transfer, index) => {
     const from = transfer.from.toLowerCase();
-    const to = transfer.to.toLowerCase();
+    let to = transfer.to.toLowerCase();
     const token = transfer.tokenOwner.toLowerCase();
     const flow = Number(transfer.value) / 1e18;
+    
+    // Redirect to virtual sink if this is a self-transfer and edge goes to sink
+    if (isSelfTransfer && to === sink) {
+      to = virtualSink;
+    }
     
     // Create adjacency list
     if (!flowNetwork[from]) {
@@ -35,7 +45,7 @@ export function computeFlowPaths(transfers, source, sink) {
     // Add flow for this edge
     flowNetwork[from][to][token] += flow;
     
-    // Store the original transfer
+    // Store the original transfer (with the modified 'to' for virtual sink)
     const edgeKey = `${from}-${to}-${token}`;
     if (!edgeFlows.has(edgeKey)) {
       edgeFlows.set(edgeKey, []);
@@ -43,13 +53,21 @@ export function computeFlowPaths(transfers, source, sink) {
     edgeFlows.get(edgeKey).push({
       ...transfer,
       index,
-      flow
+      flow,
+      // Store both original and effective 'to' address
+      originalTo: transfer.to.toLowerCase(),
+      effectiveTo: to
     });
   });
   
+  // Add virtual sink to network if needed (it has no outgoing edges)
+  if (isSelfTransfer && virtualSink) {
+    flowNetwork[virtualSink] = {};
+  }
+  
   console.log('Flow network built, finding paths...');
   
-  // Now find all paths from source to sink by decomposing the flow
+  // Now find all paths from source to effectiveSink by decomposing the flow
   const paths = [];
   const usedFlows = new Map();
   
@@ -71,13 +89,13 @@ export function computeFlowPaths(transfers, source, sink) {
     while (queue.length > 0) {
       const current = queue.shift();
       
-      if (current === sink) {
+      if (current === effectiveSink) {
         // Found a path, now determine the flow amount
         let pathFlow = Infinity;
         const pathEdges = [];
         
         // Trace back the path
-        let node = sink;
+        let node = effectiveSink;
         while (parent[node] !== null) {
           const prev = parent[node];
           const token = tokenUsed[node];
@@ -97,7 +115,7 @@ export function computeFlowPaths(transfers, source, sink) {
           node = prev;
         }
         
-        if (pathFlow > 0.000001) { // Threshold to avoid floating point issues
+        if (pathFlow > 0.00000001) { // Threshold to avoid floating point issues
           // Update used flows
           pathEdges.forEach(edge => {
             const currentUsed = usedFlows.get(edge.edgeKey) || 0;
@@ -110,15 +128,25 @@ export function computeFlowPaths(transfers, source, sink) {
             const edgeTransfers = edgeFlows.get(edge.edgeKey) || [];
             // Find a transfer that matches this flow amount (approximately)
             const matchingTransfer = edgeTransfers.find(t => 
-              Math.abs(t.flow - pathFlow) < 0.000001
+              Math.abs(t.flow - pathFlow) < 0.00000001
             ) || edgeTransfers[0];
             
             if (matchingTransfer) {
-              pathTransfers.push(matchingTransfer);
+              // For path transfers, use the original addresses (not virtual sink)
+              pathTransfers.push({
+                ...matchingTransfer,
+                to: matchingTransfer.originalTo || matchingTransfer.to
+              });
             }
           });
           
-          const pathNodes = [source, ...pathEdges.map(e => e.to)];
+          // Build path nodes - use effective addresses for path finding
+          const pathNodes = [source];
+          pathEdges.forEach(e => {
+            // Convert virtual sink back to real sink for display
+            const nodeToAdd = (e.to === virtualSink) ? sink : e.to;
+            pathNodes.push(nodeToAdd);
+          });
           
           return {
             nodes: pathNodes,
@@ -140,7 +168,7 @@ export function computeFlowPaths(transfers, source, sink) {
           for (const [token, totalFlow] of Object.entries(tokens)) {
             const edgeKey = `${current}-${neighbor}-${token}`;
             const used = usedFlows.get(edgeKey) || 0;
-            if (totalFlow - used > 0.000001) {
+            if (totalFlow - used > 0.00000001) {
               hasFlow = true;
               visited.add(neighbor);
               parent[neighbor] = current;
@@ -182,13 +210,19 @@ export function computeFlowPaths(transfers, source, sink) {
     const totalFlow = flowNetwork[from][to][token];
     const remaining = totalFlow - used;
     
-    if (remaining > 0.000001) {
+    if (remaining > 0.00000001) {
+      // Get the original 'to' address (not virtual sink)
+      const originalTo = (to === virtualSink) ? sink : to;
+      
       remainingTransfers.push({
         from,
-        to,
+        to: originalTo,
         token,
         flow: remaining,
-        transfers: transfers.filter(t => t.flow <= remaining)
+        transfers: transfers.filter(t => t.flow <= remaining).map(t => ({
+          ...t,
+          to: t.originalTo || t.to
+        }))
       });
     }
   }

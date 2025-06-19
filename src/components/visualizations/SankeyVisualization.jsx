@@ -178,15 +178,26 @@ const SankeyVisualization = forwardRef(({
       sinkAddress = onlySinkAddresses[0] || filteredTransfers[filteredTransfers.length - 1]?.to;
     }
 
+    // Check for self-transfer case
+    const isSelfTransfer = sourceAddress === sinkAddress;
+    const virtualSinkAddress = isSelfTransfer ? `${sinkAddress}_virtual_sink` : null;
+
     // Create nodes
     const nodes = Array.from(allNodes).map(addr => {
       let color = '#CBD5E1';
-      if (addr === sourceAddress) {
-        color = highlightedNodes.has(addr) ? '#60A5FA' : '#3B82F6';
-      } else if (addr === sinkAddress) {
-        color = highlightedNodes.has(addr) ? '#F87171' : '#EF4444';
-      } else if (highlightedNodes.has(addr)) {
-        color = '#E5E7EB';
+      
+      // For self-transfer, source gets yellow color
+      if (isSelfTransfer && addr === sourceAddress) {
+        color = highlightedNodes.has(addr) ? '#FDE047' : '#e0f63b';
+      } else if (!isSelfTransfer) {
+        // Normal case (source != sink)
+        if (addr === sourceAddress) {
+          color = highlightedNodes.has(addr) ? '#60A5FA' : '#3B82F6';
+        } else if (addr === sinkAddress) {
+          color = highlightedNodes.has(addr) ? '#F87171' : '#EF4444';
+        } else if (highlightedNodes.has(addr)) {
+          color = '#E5E7EB';
+        }
       }
       
       return {
@@ -200,16 +211,37 @@ const SankeyVisualization = forwardRef(({
       };
     });
 
+    // Add virtual sink node if needed
+    if (isSelfTransfer && virtualSinkAddress) {
+      const isVirtualSinkHighlighted = highlightedNodes.has(sinkAddress);
+      nodes.push({
+        name: virtualSinkAddress,
+        realAddress: sinkAddress, // Store the real address for tooltips and interactions
+        itemStyle: {
+          color: isVirtualSinkHighlighted ? '#FDE047' : '#e0f63b', // Same yellow as source
+          borderColor: isVirtualSinkHighlighted ? '#DC2626' : undefined,
+          borderWidth: isVirtualSinkHighlighted ? 3 : 0
+        }
+      });
+    }
+
     // Create links
     const links = filteredTransfers.map((transfer, index) => {
       const flowValue = Number(transfer.value) / 1e18;
       const isWrapped = wrappedTokens.includes(transfer.tokenOwner);
+      
+      // For self-transfer, redirect links to virtual sink
+      let targetAddress = transfer.to;
+      if (isSelfTransfer && transfer.to === sinkAddress) {
+        targetAddress = virtualSinkAddress;
+      }
+      
       const edgeKey = `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`;
       const isHighlighted = highlightedEdges.has(edgeKey);
       
       return {
         source: transfer.from,
-        target: transfer.to,
+        target: targetAddress,
         value: flowValue,
         tokenOwner: transfer.tokenOwner,
         transferIndex: index,
@@ -259,10 +291,19 @@ const SankeyVisualization = forwardRef(({
     // Prepare node labels
     const nodesWithLabels = nodes.map(node => {
       const profile = nodeProfiles[node.realAddress];
-      const label = profile?.name || 
-                   (node.realAddress.startsWith('0x') 
-                     ? `${node.realAddress.slice(0, 6)}...${node.realAddress.slice(-4)}`
-                     : node.realAddress);
+      let label = profile?.name || 
+                 (node.realAddress.startsWith('0x') 
+                   ? `${node.realAddress.slice(0, 6)}...${node.realAddress.slice(-4)}`
+                   : node.realAddress);
+      
+      // For virtual sink, use the same label as the source
+      if (node.name === virtualSinkAddress) {
+        const sourceProfile = nodeProfiles[sourceAddress];
+        label = sourceProfile?.name || 
+               (sourceAddress.startsWith('0x') 
+                 ? `${sourceAddress.slice(0, 6)}...${sourceAddress.slice(-4)}`
+                 : sourceAddress);
+      }
       
       return {
         ...node,
@@ -283,6 +324,7 @@ const SankeyVisualization = forwardRef(({
         confine: true,
         formatter: function(params) {
           if (params.dataType === 'node') {
+            // Use realAddress for tooltips
             const addr = params.data.realAddress;
             const profile = nodeProfiles[addr];
             const balanceMap = balancesByAccount[addr] || {};
@@ -296,6 +338,11 @@ const SankeyVisualization = forwardRef(({
             
             if (totalCrc > 0) {
               tooltipHtml += `Total balance: ${totalCrc.toFixed(6)} CRC`;
+            }
+            
+            // Add self-transfer indicator if applicable
+            if (isSelfTransfer && (params.data.name === sourceAddress || params.data.name === virtualSinkAddress)) {
+              tooltipHtml += '<br/><em>(Self-Transfer Node)</em>';
             }
             
             return tooltipHtml;
