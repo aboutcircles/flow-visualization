@@ -1,4 +1,6 @@
+/* eslint-disable react/prop-types, no-unused-vars */
 import React from 'react';
+import PropTypes from 'prop-types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -11,6 +13,7 @@ const PathFinderForm = ({
   handleInputChange,
   handleTokensChange,
   handleWithWrapToggle,
+  handleStagingToggle,
   handleFromTokensExclusionToggle,
   handleToTokensExclusionToggle,
   onFindPath,
@@ -82,6 +85,25 @@ const PathFinderForm = ({
             label="Include Wrapped Tokens"
           />
         </div>
+        <div>
+          <ToggleSwitch
+            isEnabled={formData.UseStaging}
+            onToggle={handleStagingToggle}
+            label="Use Staging Endpoint"
+          />
+        </div>
+        {formData.UseStaging && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Max Transfers</label>
+            <Input
+              name="maxTransfers"
+              value={formData.MaxTransfers}
+              onChange={handleInputChange}
+              placeholder="Max transfers"
+              type="number"
+            />
+          </div>
+        )}
 
         {pathData && (
           <div className="mb-4">
@@ -125,4 +147,35 @@ const PathFinderForm = ({
   );
 };
 
+PathFinderForm.propTypes = {
+  formData: PropTypes.shape({
+    From: PropTypes.string.isRequired,
+    To: PropTypes.string.isRequired,
+    crcAmount: PropTypes.string.isRequired,
+    FromTokens: PropTypes.string,
+    ToTokens: PropTypes.string,
+    ExcludedFromTokens: PropTypes.string,
+    ExcludedToTokens: PropTypes.string,
+    WithWrap: PropTypes.bool.isRequired,
+    UseStaging: PropTypes.bool.isRequired,
+    MaxTransfers: PropTypes.string,
+    IsFromTokensExcluded: PropTypes.bool.isRequired,
+    IsToTokensExcluded: PropTypes.bool.isRequired,
+  }).isRequired,
+  handleInputChange: PropTypes.func.isRequired,
+  handleTokensChange: PropTypes.func.isRequired,
+  handleWithWrapToggle: PropTypes.func.isRequired,
+  handleStagingToggle: PropTypes.func.isRequired,
+  handleFromTokensExclusionToggle: PropTypes.func.isRequired,
+  handleToTokensExclusionToggle: PropTypes.func.isRequired,
+  onFindPath: PropTypes.func.isRequired,
+  isLoading: PropTypes.bool.isRequired,
+  pathData: PropTypes.object,
+  minCapacity: PropTypes.number,
+  setMinCapacity: PropTypes.func,
+  maxCapacity: PropTypes.number,
+  setMaxCapacity: PropTypes.func,
+  boundMin: PropTypes.number,
+  boundMax: PropTypes.number,
+};
 export default PathFinderForm;

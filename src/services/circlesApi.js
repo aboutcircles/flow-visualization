@@ -3,6 +3,7 @@ import { Profiles } from "@circles-sdk/profiles";
 import cacheService from './cacheService';
 
 export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
+export const STAGING_ENDPOINT = 'https://rpc.circlesubi.network/';
 
 
 export const createCirclesClients = () => {
@@ -41,6 +42,8 @@ export const ethToWei = (crcAmount) => {
 };
 
 export const findPath = async (formData) => {
+  // Choose RPC endpoint based on staging toggle
+  const endpoint = formData.UseStaging ? STAGING_ENDPOINT : API_ENDPOINT;
   try {
     const fromTokensArray = parseAddressList(formData.FromTokens);
     const toTokensArray = parseAddressList(formData.ToTokens);
@@ -70,6 +73,10 @@ export const findPath = async (formData) => {
     }
 
     params.WithWrap = formData.WithWrap;
+    // Include MaxTransfers parameter when using staging endpoint
+    if (formData.UseStaging && formData.MaxTransfers) {
+      params.MaxTransfers = formData.MaxTransfers;
+    }
 
     const requestBody = {
       jsonrpc: "2.0",
@@ -80,7 +87,7 @@ export const findPath = async (formData) => {
 
     console.log('Sending JSON-RPC request:', requestBody);
 
-    const response = await fetch(API_ENDPOINT, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -183,13 +190,13 @@ export const fetchTokenInfo = async (circlesData, transfers, useCache = true) =>
         }
 
         const rpcArray = await res.json();
-        rpcArray.forEach((rpc, index) => {
+        rpcArray.forEach((rpc) => {
           if (rpc.error) {
             console.error('RPC error:', rpc.error);
             return;
           }
           
-          const accountAddr = slice[index];
+          // const accountAddr = slice[index]; // removed unused variable
           
           // Extract token info from balance results
           rpc.result?.forEach((balanceEntry) => {
