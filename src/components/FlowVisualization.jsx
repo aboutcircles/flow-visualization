@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types, no-unused-vars */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useFormData } from '@/hooks/useFormData';
 import { usePathData } from '@/hooks/usePathData';
@@ -35,6 +36,7 @@ const FlowVisualization = () => {
     handleInputChange, 
     handleTokensChange, 
     handleWithWrapToggle,
+    handleStagingToggle,
     handleFromTokensExclusionToggle,
     handleToTokensExclusionToggle
   } = useFormData();
@@ -274,6 +276,7 @@ const FlowVisualization = () => {
             handleInputChange={handleInputChange}
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
+            handleStagingToggle={handleStagingToggle}
             handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
             handleToTokensExclusionToggle={handleToTokensExclusionToggle}
             onFindPath={handleFindPath}
@@ -384,7 +387,7 @@ const FlowVisualization = () => {
               ) : (
                 <div className="flex items-center justify-center h-full text-gray-500">
                   <div className="text-center">
-                    <p className="mb-2">Enter addresses and click "Find Path" to visualize the flow</p>
+                    <p className="mb-2">Enter addresses and click &quot;Find Path&quot; to visualize the flow</p>
                     <p className="text-sm text-gray-400">
                       Keyboard shortcuts: +/- zoom, F fit, C center, 1-4 presets, S toggle sidebar, K switch view, ESC clear highlights
                     </p>

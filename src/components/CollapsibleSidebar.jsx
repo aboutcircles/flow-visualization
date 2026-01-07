@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types, no-unused-vars */
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -10,6 +11,7 @@ const CollapsibleSidebar = ({
   handleInputChange,
   handleTokensChange,
   handleWithWrapToggle,
+  handleStagingToggle,
   handleFromTokensExclusionToggle,
   handleToTokensExclusionToggle,
   onFindPath,
@@ -51,6 +53,7 @@ const CollapsibleSidebar = ({
             handleInputChange={handleInputChange}
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
+            handleStagingToggle={handleStagingToggle}
             handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
             handleToTokensExclusionToggle={handleToTokensExclusionToggle}
             onFindPath={onFindPath}
