@@ -1,3 +1,5 @@
+/* eslint-disable react/prop-types, no-unused-vars */
+/* eslint-disable react/prop-types, no-unused-vars */
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
@@ -11,6 +13,7 @@ const CollapsibleLeftPanel = ({
   handleInputChange,
   handleTokensChange,
   handleWithWrapToggle,
+  handleStagingToggle,
   handleFromTokensExclusionToggle,
   handleToTokensExclusionToggle,
   onFindPath,
@@ -81,6 +84,7 @@ const CollapsibleLeftPanel = ({
                 handleInputChange={handleInputChange}
                 handleTokensChange={handleTokensChange}
                 handleWithWrapToggle={handleWithWrapToggle}
+                handleStagingToggle={handleStagingToggle}
                 handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
                 handleToTokensExclusionToggle={handleToTokensExclusionToggle}
                 onFindPath={onFindPath}

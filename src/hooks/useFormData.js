@@ -12,10 +12,12 @@ export const useFormData = () => {
     crcAmount: '1000',  // Amount in ETH (for UI display)
     Amount: '1000000000000000000000', // Amount in Wei (calculated from crcAmount)
     WithWrap: true, // Flag for API endpoint
+    UseStaging: false, // Toggle to use staging endpoint
+    MaxTransfers: '10', // MaxTransfers parameter for staging endpoint
     IsFromTokensExcluded: false, // Flag to determine if FromTokens are to be excluded
     IsToTokensExcluded: false, // Flag to determine if ToTokens are to be excluded
   });
-  
+
   const [formErrors, setFormErrors] = useState({});
 
   // Handle form input changes
@@ -34,8 +36,10 @@ export const useFormData = () => {
       // Map UI field names to the capitalized API parameter names
       const mappedFieldName = name === 'from' ? 'From' :
         name === 'to' ? 'To' :
-          name === 'fromTokens' ? 'FromTokens' :
-            name === 'toTokens' ? 'ToTokens' : name;
+        name === 'fromTokens' ? 'FromTokens' :
+        name === 'toTokens' ? 'ToTokens' :
+        name === 'maxTransfers' ? 'MaxTransfers' :
+        name;
 
       // For other fields, store value as is
       setFormData(prev => ({
@@ -126,6 +130,13 @@ export const useFormData = () => {
     }));
   };
 
+  const handleStagingToggle = () => {
+    setFormData(prev => ({
+      ...prev,
+      UseStaging: !prev.UseStaging
+    }));
+  };
+
   return {
     formData,
     formErrors,
@@ -133,6 +144,7 @@ export const useFormData = () => {
     handleInputChange,
     handleTokensChange,
     handleWithWrapToggle,
+    handleStagingToggle,
     handleFromTokensExclusionToggle,
     handleToTokensExclusionToggle
   };
