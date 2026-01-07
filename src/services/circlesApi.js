@@ -73,8 +73,8 @@ export const findPath = async (formData) => {
     }
 
     params.WithWrap = formData.WithWrap;
-    // Include MaxTransfers parameter when using staging endpoint
-    if (formData.UseStaging && formData.MaxTransfers) {
+    // Include MaxTransfers parameter if set
+    if (formData.MaxTransfers) {
       params.MaxTransfers = formData.MaxTransfers;
     }
 

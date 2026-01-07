@@ -92,18 +92,16 @@ const PathFinderForm = ({
             label="Use Staging Endpoint"
           />
         </div>
-        {formData.UseStaging && (
-          <div>
-            <label className="block text-sm font-medium mb-1">Max Transfers</label>
-            <Input
-              name="maxTransfers"
-              value={formData.MaxTransfers}
-              onChange={handleInputChange}
-              placeholder="Max transfers"
-              type="number"
-            />
-          </div>
-        )}
+        <div>
+          <label className="block text-sm font-medium mb-1">Max Transfers</label>
+          <Input
+            name="maxTransfers"
+            value={formData.MaxTransfers}
+            onChange={handleInputChange}
+            placeholder="Max transfers"
+            type="number"
+          />
+        </div>
 
         {pathData && (
           <div className="mb-4">
