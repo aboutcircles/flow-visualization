@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X } from "lucide-react";
+import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X, Loader2 } from "lucide-react";
 import { generateFlowMatrixParams } from "@/lib/utils";
 import { encodeFunctionData } from "viem";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
@@ -70,202 +70,10 @@ const OPERATE_FLOW_MATRIX_ABI = [
   },
 ];
 
-// API endpoint for RPC calls
-const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
-
-// Fetch token info to determine if it's wrapped and get the actual owner
-async function fetchTokenInfo(tokenAddress) {
-  try {
-    const requestBody = {
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method: "circles_getTokenInfo",
-      params: [tokenAddress.toLowerCase()]
-    };
-
-    const response = await fetch(API_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      console.error(`Failed to fetch token info for ${tokenAddress}`);
-      return null;
-    }
-
-    const responseData = await response.json();
-    
-    if (responseData.error) {
-      console.error(`RPC error for token ${tokenAddress}:`, responseData.error);
-      return null;
-    }
-
-    console.log(`Token info response for ${tokenAddress}:`, responseData.result);
-    return responseData.result;
-  } catch (error) {
-    console.error(`Error fetching token info for ${tokenAddress}:`, error);
-    return null;
-  }
-}
-
-async function generateFlowMatrixParams(pathData, from) {
-  if (!pathData || !from || !pathData.transfers || pathData.transfers.length === 0) return null;
-  
-  try {
-    // Extract the 'to' address
-    const to = pathData.transfers.length > 0 
-      ? pathData.transfers[pathData.transfers.length - 1].to.toLowerCase()
-      : null;
-    
-    // Normalize from address
-    from = from.toLowerCase();
-    
-    // First, collect all unique token addresses from transfers
-    const tokenAddresses = [...new Set(pathData.transfers.map(t => t.tokenOwner.toLowerCase()))];
-    
-    // Fetch token info for all tokens to check if they're wrapped
-    const tokenInfoPromises = tokenAddresses.map(addr => fetchTokenInfo(addr));
-    const tokenInfoResults = await Promise.all(tokenInfoPromises);
-    
-    // Create a mapping from token to actual owner
-    const tokenToOwnerMapping = {};
-    
-    tokenAddresses.forEach((tokenAddr, index) => {
-      const info = tokenInfoResults[index];
-      if (info) {
-        // Check if it's a wrapped token - use tokenType not type
-        if (info.tokenType === 'CrcV2_ERC20WrapperDeployed_Inflationary' || 
-            info.tokenType === 'CrcV2_ERC20WrapperDeployed_Demurraged') {
-          tokenToOwnerMapping[tokenAddr] = info.tokenOwner.toLowerCase();
-          console.log(`Token ${tokenAddr} is wrapped (${info.tokenType}), actual owner: ${info.tokenOwner}`);
-        } else {
-          tokenToOwnerMapping[tokenAddr] = tokenAddr;
-          console.log(`Token ${tokenAddr} is not wrapped, using same address`);
-        }
-      } else {
-        // If we couldn't fetch info, assume the token is its own owner
-        tokenToOwnerMapping[tokenAddr] = tokenAddr;
-        console.warn(`Could not fetch info for token ${tokenAddr}, assuming not wrapped`);
-      }
-    });
-    
-    console.log('Final token to owner mapping:', tokenToOwnerMapping);
-    
-    // 1. Build the vertices list (unique addresses involved in transfers)
-    const addressSet = new Set();
-    addressSet.add(from);
-    if (to) addressSet.add(to);
-    
-    // Normalize all transfers
-    const normalizedTransfers = pathData.transfers.map(t => ({
-      from: t.from.toLowerCase(),
-      to: t.to.toLowerCase(),
-      tokenOwner: t.tokenOwner.toLowerCase(),
-      value: t.value
-    }));
-    
-    // Add all addresses from transfers (using actual token owners for wrapped tokens)
-    normalizedTransfers.forEach(transfer => {
-      addressSet.add(transfer.from);
-      addressSet.add(transfer.to);
-      // Add the actual token owner (not the wrapped token address)
-      const actualOwner = tokenToOwnerMapping[transfer.tokenOwner] || transfer.tokenOwner;
-      addressSet.add(actualOwner);
-    });
-    
-    // Convert to sorted array (using BigInt sorting like in the TypeScript implementation)
-    console.log('Address set before sorting:', Array.from(addressSet));
-    
-    const flowVertices = Array.from(addressSet).sort((a, b) => {
-      // Add '0x' prefix if not present to avoid conversion errors
-      const aHex = a.startsWith('0x') ? a : '0x' + a;
-      const bHex = b.startsWith('0x') ? b : '0x' + b;
-      
-      try {
-        const bigintA = BigInt(aHex);
-        const bigintB = BigInt(bHex);
-        return bigintA < bigintB ? -1 : bigintA > bigintB ? 1 : 0;
-      } catch (e) {
-        // Fallback to string comparison if BigInt conversion fails
-        return a.localeCompare(b);
-      }
-    });
-    
-    // 2. Create a lookup map for addresses to indices
-    const lookup = {};
-    flowVertices.forEach((addr, index) => {
-      lookup[addr] = index;
-    });
-    
-    // 3. Build flow edges and coordinates
-    const flowEdges = [];
-    const coordinates = [];
-    
-    normalizedTransfers.forEach(transfer => {
-      // Mark edges that flow to the destination with streamSinkId=1
-      const isToSink = to && transfer.to === to;
-      
-      // Add flow edge
-      flowEdges.push({
-        streamSinkId: isToSink ? 1 : 0,
-        amount: transfer.value
-      });
-      
-      // Add coordinates (token, from, to) - using actual token owner for wrapped tokens
-      const actualTokenOwner = tokenToOwnerMapping[transfer.tokenOwner] || transfer.tokenOwner;
-      coordinates.push(
-        lookup[actualTokenOwner],
-        lookup[transfer.from],
-        lookup[transfer.to]
-      );
-    });
-    
-    // Ensure at least one terminal edge is marked, as in the TypeScript code
-    if (!flowEdges.some(edge => edge.streamSinkId === 1) && flowEdges.length > 0) {
-      // Find the last edge where transfer.to matches the 'to' address
-      const lastIndex = normalizedTransfers.map(t => t.to).lastIndexOf(to);
-      if (lastIndex !== -1) {
-        flowEdges[lastIndex].streamSinkId = 1;
-      } else {
-        // If not found, set the last edge as terminal by default
-        flowEdges[flowEdges.length - 1].streamSinkId = 1;
-      }
-    }
-    
-    // 4. Create flowEdgeIds array (indices of edges with streamSinkId = 1)
-    const flowEdgeIds = flowEdges
-      .map((edge, index) => edge.streamSinkId === 1 ? index : -1)
-      .filter(index => index !== -1);
-    
-    // 5. Create stream object
-    const stream = {
-      sourceCoordinate: lookup[from],
-      flowEdgeIds: flowEdgeIds,
-      data: "0x" // Empty bytes
-    };
-    
-    // 6. Pack coordinates
-    const packedCoordinates = packCoordinates(coordinates);
-    
-    // Create the final params object
-    return {
-      _flowVertices: flowVertices,
-      _flow: flowEdges,
-      _streams: [stream],
-      _packedCoordinates: packedCoordinates
-    };
-  } catch (error) {
-    console.error('Error generating operateFlowMatrix params:', error);
-    return null;
-  }
-}
-
 const FlowMatrixParams = ({ pathData, sender }) => {
   const [params, setParams] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isGeneratingParams, setIsGeneratingParams] = useState(false);
+  const [paramsError, setParamsError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
   const [expanded, setExpanded] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
@@ -279,18 +87,29 @@ const FlowMatrixParams = ({ pathData, sender }) => {
     hash,
   });
 
+  // Generate flow matrix params (now async to handle wrapped tokens)
   useEffect(() => {
-    if (!pathData || !sender) return;
-    
-    setIsLoading(true);
+    if (!pathData || !sender) {
+      setParams(null);
+      return;
+    }
+
+    setIsGeneratingParams(true);
+    setParamsError(null);
+
     generateFlowMatrixParams(pathData, sender)
       .then(flowParams => {
         setParams(flowParams);
-        setIsLoading(false);
+        setIsGeneratingParams(false);
+        if (!flowParams) {
+          setParamsError('Failed to generate parameters');
+        }
       })
       .catch(err => {
         console.error('Error generating params:', err);
-        setIsLoading(false);
+        setParamsError(err.message || 'Failed to generate parameters');
+        setParams(null);
+        setIsGeneratingParams(false);
       });
   }, [pathData, sender]);
 
@@ -411,6 +230,38 @@ const FlowMatrixParams = ({ pathData, sender }) => {
       console.error("Error executing transaction:", error);
     }
   };
+
+  // Show loading state while generating params
+  if (isGeneratingParams) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2">
+            <Loader2 size={18} className="text-blue-500 animate-spin" />
+            <span className="text-gray-600">Generating operateFlowMatrix parameters...</span>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Resolving token info for wrapped tokens...
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Show error state
+  if (paramsError) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2 text-red-600">
+            <Code size={18} />
+            <span>Error generating parameters</span>
+          </div>
+          <p className="text-sm text-red-500 mt-2">{paramsError}</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (!params) return null;
 
@@ -569,11 +420,11 @@ const FlowMatrixParams = ({ pathData, sender }) => {
               </div>
               <p className="text-xs text-gray-500 mt-4 text-center">
                 {window?.rabby 
-                  ? '✓ Rabby Wallet is installed and ready' 
+                  ? '✔ Rabby Wallet is installed and ready' 
                   : window?.ethereum?.isMetaMask 
-                  ? '✓ MetaMask is installed and ready'
+                  ? '✔ MetaMask is installed and ready'
                   : window?.ethereum
-                  ? '✓ Wallet detected'
+                  ? '✔ Wallet detected'
                   : 'Please install a Web3 wallet to continue'}
               </p>
             </div>

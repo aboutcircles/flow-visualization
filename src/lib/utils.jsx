@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { fetchTokenInfoByAddress } from '@/services/circlesApi';
 
 /**
  * Combines multiple class names using clsx and tailwind-merge
@@ -31,12 +32,25 @@ export function packCoordinates(coordinates) {
 /**
  * Helper to generate all parameters for operateFlowMatrix
  * Based on the TypeScript implementation from the SDK
+ * 
+ * IMPORTANT: This function handles wrapped tokens properly by resolving
+ * the actual token owner address instead of using the wrapper contract address.
+ * 
+ * For wrapped tokens:
+ * - transfer.tokenOwner = wrapper contract address (e.g., 0xWrapperContract)
+ * - actual token owner = the avatar who minted the original token
+ * 
+ * The operateFlowMatrix function on the Hub contract expects the actual
+ * token owner in the packed coordinates, NOT the wrapper address.
+ * 
  * @param {Object} pathData - The path data from API
  * @param {string} from - Source address
- * @returns {Object} - Parameters object for operateFlowMatrix
+ * @returns {Promise<Object|null>} - Parameters object for operateFlowMatrix
  */
-export function generateFlowMatrixParams(pathData, from) {
-  if (!pathData || !from || !pathData.transfers || pathData.transfers.length === 0) return null;
+export async function generateFlowMatrixParams(pathData, from) {
+  if (!pathData || !from || !pathData.transfers || pathData.transfers.length === 0) {
+    return null;
+  }
   
   try {
     // Extract the 'to' address
@@ -47,7 +61,48 @@ export function generateFlowMatrixParams(pathData, from) {
     // Normalize from address
     from = from.toLowerCase();
     
-    // 1. Build the vertices list (unique addresses involved in transfers)
+    // 1. Collect all unique token addresses from transfers
+    const tokenAddresses = [...new Set(
+      pathData.transfers.map(t => t.tokenOwner.toLowerCase())
+    )];
+    
+    // 2. Fetch token info for all tokens to check if they're wrapped
+    // This is the critical step that resolves wrapped token addresses to actual owners
+    console.log('Fetching token info for:', tokenAddresses);
+    
+    const tokenToOwnerMapping = {};
+    
+    for (const tokenAddr of tokenAddresses) {
+      const info = await fetchTokenInfoByAddress(tokenAddr);
+      
+      if (info) {
+        // Check if it's a wrapped token based on tokenType
+        // Wrapped tokens have these types:
+        // - CrcV2_ERC20WrapperDeployed_Inflationary
+        // - CrcV2_ERC20WrapperDeployed_Demurraged
+        const isWrapped = 
+          info.tokenType === 'CrcV2_ERC20WrapperDeployed_Inflationary' ||
+          info.tokenType === 'CrcV2_ERC20WrapperDeployed_Demurraged';
+        
+        if (isWrapped && info.tokenOwner) {
+          // Use the actual token owner (the avatar who minted the original token)
+          tokenToOwnerMapping[tokenAddr] = info.tokenOwner.toLowerCase();
+          console.log(`Token ${tokenAddr} is wrapped (${info.tokenType}), actual owner: ${info.tokenOwner}`);
+        } else {
+          // Not wrapped - the token address IS the owner
+          tokenToOwnerMapping[tokenAddr] = tokenAddr;
+          console.log(`Token ${tokenAddr} is not wrapped, using same address`);
+        }
+      } else {
+        // Fallback: assume token is its own owner if we can't fetch info
+        tokenToOwnerMapping[tokenAddr] = tokenAddr;
+        console.warn(`Could not fetch info for token ${tokenAddr}, assuming not wrapped`);
+      }
+    }
+    
+    console.log('Final token to owner mapping:', tokenToOwnerMapping);
+    
+    // 3. Build the vertices list (unique addresses involved in transfers)
     const addressSet = new Set();
     addressSet.add(from);
     if (to) addressSet.add(to);
@@ -60,14 +115,18 @@ export function generateFlowMatrixParams(pathData, from) {
       value: t.value
     }));
     
-    // Add all addresses from transfers
+    // Add all addresses from transfers (using actual token owners for wrapped tokens)
     normalizedTransfers.forEach(transfer => {
       addressSet.add(transfer.from);
       addressSet.add(transfer.to);
-      addressSet.add(transfer.tokenOwner);
+      // CRITICAL: Use the actual token owner (not wrapper address)
+      const actualOwner = tokenToOwnerMapping[transfer.tokenOwner] || transfer.tokenOwner;
+      addressSet.add(actualOwner);
     });
     
-    // Convert to sorted array (using BigInt sorting like in the TypeScript implementation)
+    console.log('Address set before sorting:', Array.from(addressSet));
+    
+    // 4. Convert to sorted array (using BigInt sorting like in the TypeScript implementation)
     const flowVertices = Array.from(addressSet).sort((a, b) => {
       // Add '0x' prefix if not present to avoid conversion errors
       const aHex = a.startsWith('0x') ? a : '0x' + a;
@@ -83,13 +142,13 @@ export function generateFlowMatrixParams(pathData, from) {
       }
     });
     
-    // 2. Create a lookup map for addresses to indices
+    // 5. Create a lookup map for addresses to indices
     const lookup = {};
     flowVertices.forEach((addr, index) => {
       lookup[addr] = index;
     });
     
-    // 3. Build flow edges and coordinates
+    // 6. Build flow edges and coordinates
     const flowEdges = [];
     const coordinates = [];
     
@@ -104,14 +163,16 @@ export function generateFlowMatrixParams(pathData, from) {
       });
       
       // Add coordinates (token, from, to)
+      // CRITICAL: Use ACTUAL token owner for coordinates (not wrapper address)
+      const actualTokenOwner = tokenToOwnerMapping[transfer.tokenOwner] || transfer.tokenOwner;
       coordinates.push(
-        lookup[transfer.tokenOwner],
+        lookup[actualTokenOwner],
         lookup[transfer.from],
         lookup[transfer.to]
       );
     });
     
-    // Ensure at least one terminal edge is marked, as in the TypeScript code
+    // 7. Ensure at least one terminal edge is marked, as in the TypeScript code
     if (!flowEdges.some(edge => edge.streamSinkId === 1) && flowEdges.length > 0) {
       // Find the last edge where transfer.to matches the 'to' address
       const lastIndex = normalizedTransfers.map(t => t.to).lastIndexOf(to);
@@ -123,19 +184,19 @@ export function generateFlowMatrixParams(pathData, from) {
       }
     }
     
-    // 4. Create flowEdgeIds array (indices of edges with streamSinkId = 1)
+    // 8. Create flowEdgeIds array (indices of edges with streamSinkId = 1)
     const flowEdgeIds = flowEdges
       .map((edge, index) => edge.streamSinkId === 1 ? index : -1)
       .filter(index => index !== -1);
     
-    // 5. Create stream object
+    // 9. Create stream object
     const stream = {
       sourceCoordinate: lookup[from],
       flowEdgeIds: flowEdgeIds,
       data: "0x" // Empty bytes
     };
     
-    // 6. Pack coordinates
+    // 10. Pack coordinates
     const packedCoordinates = packCoordinates(coordinates);
     
     // Create the final params object
