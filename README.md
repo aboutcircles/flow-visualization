@@ -49,6 +49,7 @@ A React-based visualization tool for exploring and analyzing transaction paths i
 - Node.js (version 16 or higher)
 - npm or yarn package manager
 - Modern web browser with ES6+ support
+- Web3 wallet (Rabby, MetaMask, WalletConnect, etc.) for transaction execution
 
 ## Installation
 
@@ -63,7 +64,12 @@ cd flow-visualization
 npm install
 ```
 
-3. Start the development server:
+3. (Optional) Configure WalletConnect:
+   - Get a project ID from [WalletConnect Cloud](https://cloud.walletconnect.com)
+   - Update `src/config/wagmi.js` with your project ID
+   - This enables QR code wallet connection (injected wallets like MetaMask work without this)
+
+4. Start the development server:
 ```bash
 npm run dev
 ```
@@ -142,6 +148,33 @@ src/
 3. **Find Path**:
    - Click "Find Path" to compute the optimal route
    - The visualization will show all possible transfers
+
+### Executing Transactions On-Chain
+
+Once you have found a path, you can execute it directly from the application:
+
+1. **Connect Your Wallet**:
+   - Click the "Connect Wallet" button in the Flow Matrix Parameters section
+   - Select your preferred wallet from the modal (Rabby, MetaMask, WalletConnect, etc.)
+   - Approve the connection in your wallet
+   - Your connected address will be displayed
+
+2. **Switch to Gnosis Chain** (if needed):
+   - If you're on a different network, click "Switch to Gnosis Chain"
+   - Approve the network switch in your wallet
+
+3. **Execute the Transaction**:
+   - Click "Execute Transaction" to send the transaction
+   - The transaction will be sent to the Circles Hub contract at `0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8`
+   - Approve the transaction in your wallet
+   - Transaction status will be displayed (pending, confirming, confirmed)
+
+4. **Transaction Details**:
+   - The transaction hash will be shown once submitted
+   - You can track the transaction on a block explorer
+   - Success/error messages will appear below the buttons
+
+**Note**: The "Copy Calldata" button remains available if you prefer to execute the transaction manually through a different interface.
 
 ### Visualization Modes
 
@@ -374,6 +407,35 @@ Clear cache via Performance panel or programmatically:
 ```javascript
 cacheService.clearAll();
 ```
+
+## Wallet Integration
+
+The application uses wagmi for Web3 wallet integration:
+
+### Supported Wallets
+- Rabby Wallet (automatically detected)
+- MetaMask (and other injected providers)
+- WalletConnect (with project ID configured)
+- Coinbase Wallet
+- Brave Wallet
+- Any EIP-1193 compatible wallet
+
+### Network Configuration
+- **Chain**: Gnosis Chain (Chain ID: 100)
+- **Hub Contract**: `0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8`
+
+### Transaction Flow
+1. Connect wallet
+2. Ensure Gnosis Chain is selected
+3. Transaction parameters are generated from the computed path
+4. Execute `operateFlowMatrix` function on the Hub contract
+5. Wait for confirmation
+
+The wallet integration automatically handles:
+- Network switching
+- Transaction signing
+- Confirmation tracking
+- Error handling and display
 
 ## License
 
