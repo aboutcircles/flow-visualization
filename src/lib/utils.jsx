@@ -119,7 +119,7 @@ export async function generateFlowMatrixParams(pathData, from) {
     normalizedTransfers.forEach(transfer => {
       addressSet.add(transfer.from);
       addressSet.add(transfer.to);
-      // CRITICAL: Use the actual token owner (not wrapper address)
+      // Use the actual token owner (not wrapper address)
       const actualOwner = tokenToOwnerMapping[transfer.tokenOwner] || transfer.tokenOwner;
       addressSet.add(actualOwner);
     });
@@ -163,7 +163,7 @@ export async function generateFlowMatrixParams(pathData, from) {
       });
       
       // Add coordinates (token, from, to)
-      // CRITICAL: Use ACTUAL token owner for coordinates (not wrapper address)
+      // Use ACTUAL token owner for coordinates (not wrapper address)
       const actualTokenOwner = tokenToOwnerMapping[transfer.tokenOwner] || transfer.tokenOwner;
       coordinates.push(
         lookup[actualTokenOwner],
