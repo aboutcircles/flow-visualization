@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X } from "lucide-react";
+import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X, Loader2 } from "lucide-react";
 import { generateFlowMatrixParams } from "@/lib/utils";
 import { encodeFunctionData } from "viem";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
@@ -72,6 +72,8 @@ const OPERATE_FLOW_MATRIX_ABI = [
 
 const FlowMatrixParams = ({ pathData, sender }) => {
   const [params, setParams] = useState(null);
+  const [isGeneratingParams, setIsGeneratingParams] = useState(false);
+  const [paramsError, setParamsError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
   const [expanded, setExpanded] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
@@ -85,10 +87,30 @@ const FlowMatrixParams = ({ pathData, sender }) => {
     hash,
   });
 
+  // Generate flow matrix params (now async to handle wrapped tokens)
   useEffect(() => {
-    if (!pathData || !sender) return;
-    const flowParams = generateFlowMatrixParams(pathData, sender);
-    setParams(flowParams);
+    if (!pathData || !sender) {
+      setParams(null);
+      return;
+    }
+
+    setIsGeneratingParams(true);
+    setParamsError(null);
+
+    generateFlowMatrixParams(pathData, sender)
+      .then(flowParams => {
+        setParams(flowParams);
+        setIsGeneratingParams(false);
+        if (!flowParams) {
+          setParamsError('Failed to generate parameters');
+        }
+      })
+      .catch(err => {
+        console.error('Error generating params:', err);
+        setParamsError(err.message || 'Failed to generate parameters');
+        setParams(null);
+        setIsGeneratingParams(false);
+      });
   }, [pathData, sender]);
 
   useEffect(() => {
@@ -208,6 +230,38 @@ const FlowMatrixParams = ({ pathData, sender }) => {
       console.error("Error executing transaction:", error);
     }
   };
+
+  // Show loading state while generating params
+  if (isGeneratingParams) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2">
+            <Loader2 size={18} className="text-blue-500 animate-spin" />
+            <span className="text-gray-600">Generating operateFlowMatrix parameters...</span>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Resolving token info for wrapped tokens...
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Show error state
+  if (paramsError) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2 text-red-600">
+            <Code size={18} />
+            <span>Error generating parameters</span>
+          </div>
+          <p className="text-sm text-red-500 mt-2">{paramsError}</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (!params) return null;
 
@@ -366,11 +420,11 @@ const FlowMatrixParams = ({ pathData, sender }) => {
               </div>
               <p className="text-xs text-gray-500 mt-4 text-center">
                 {window?.rabby 
-                  ? '✓ Rabby Wallet is installed and ready' 
+                  ? '✔ Rabby Wallet is installed and ready' 
                   : window?.ethereum?.isMetaMask 
-                  ? '✓ MetaMask is installed and ready'
+                  ? '✔ MetaMask is installed and ready'
                   : window?.ethereum
-                  ? '✓ Wallet detected'
+                  ? '✔ Wallet detected'
                   : 'Please install a Web3 wallet to continue'}
               </p>
             </div>

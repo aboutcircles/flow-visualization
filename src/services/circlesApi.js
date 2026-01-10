@@ -371,3 +371,65 @@ export const fetchProfiles = async (circlesProfiles, addresses, useCache = true)
 };
 
 export const fetchTokenBalances = fetchTokenBalancesWithInfo;
+
+/**
+ * Fetch detailed token info by address using circles_getTokenInfo RPC method
+ * This is used to determine if a token is wrapped and get the actual token owner
+ * @param {string} tokenAddress - The token address to fetch info for
+ * @returns {Promise<Object|null>} - Token info object or null if failed
+ */
+export const fetchTokenInfoByAddress = async (tokenAddress) => {
+  try {
+    const requestBody = {
+      jsonrpc: "2.0",
+      id: Date.now(),
+      method: "circles_getTokenInfo",
+      params: [tokenAddress.toLowerCase()]
+    };
+
+    const response = await fetch(API_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to fetch token info for ${tokenAddress}`);
+      return null;
+    }
+
+    const responseData = await response.json();
+    
+    if (responseData.error) {
+      console.error(`RPC error for token ${tokenAddress}:`, responseData.error);
+      return null;
+    }
+
+    return responseData.result;
+  } catch (error) {
+    console.error(`Error fetching token info for ${tokenAddress}:`, error);
+    return null;
+  }
+};
+
+/**
+ * Batch fetch token info for multiple tokens
+ * More efficient than individual calls when dealing with many tokens
+ * @param {string[]} tokenAddresses - Array of token addresses
+ * @returns {Promise<Object>} - Map of token address to token info
+ */
+export const fetchTokenInfoBatch = async (tokenAddresses) => {
+  const uniqueTokens = [...new Set(tokenAddresses.map(a => a.toLowerCase()))];
+  const results = {};
+  
+  // Use Promise.all for parallel fetching
+  const promises = uniqueTokens.map(async (addr) => {
+    const info = await fetchTokenInfoByAddress(addr);
+    results[addr] = info;
+  });
+  
+  await Promise.all(promises);
+  return results;
+};
