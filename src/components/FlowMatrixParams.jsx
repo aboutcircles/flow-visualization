@@ -291,7 +291,7 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
         )}
         {isFiltered && (
           <div className="flex items-center gap-2 mb-3 p-2 bg-indigo-50 border border-indigo-200 rounded text-indigo-800 text-xs">
-            <span>Cherry-picked: {pathData.transfers.length} transfer{pathData.transfers.length !== 1 ? 's' : ''} selected. Subset may not form a valid flow matrix.</span>
+            <span>Filtered: using {pathData.transfers.length} transfer{pathData.transfers.length !== 1 ? 's' : ''} from selected routes.</span>
           </div>
         )}
         <div className="flex justify-between items-center mb-2">

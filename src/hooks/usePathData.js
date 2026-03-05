@@ -166,19 +166,7 @@ export const usePathData = () => {
     loadNodeProfiles();
   }, [pathData, circlesProfiles, config.rendering.features.nodeLabels, config.data]);
 
-  // Set capacity range only on new search (rawPathData change), not on view toggle
-  useEffect(() => {
-    if (!rawPathData) return;
-
-    const values = rawPathData.transfers.map(t => Number(t.value) / 1e18);
-    const trueMin = Math.min(...values);
-    const trueMax = Math.max(...values);
-
-    setBoundMin(trueMin);
-    setBoundMax(trueMax);
-    setMinCapacity(trueMin);
-    setMaxCapacity(trueMax);
-  }, [rawPathData]);
+  // Bounds are now set by route decomposition in FlowVisualization
 
   return {
     pathData,
@@ -200,6 +188,8 @@ export const usePathData = () => {
     maxCapacity,
     setMaxCapacity,
     boundMin,
-    boundMax
+    setBoundMin,
+    boundMax,
+    setBoundMax
   };
 };

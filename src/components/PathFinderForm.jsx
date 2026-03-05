@@ -25,7 +25,7 @@ const PathFinderForm = ({
   setMaxCapacity,
   boundMin,
   boundMax,
-  cherryPickInfo
+  routeSelectionInfo
 }) => {
   const fromTokensRef = useRef(null);
   const toTokensRef = useRef(null);
@@ -148,13 +148,12 @@ const PathFinderForm = ({
         {pathData && (
           <div className="mb-4">
             <label className="block text-sm font-medium mb-1">
-              Capacity range: {minCapacity.toFixed(3)} → {maxCapacity.toFixed(3)}
-              <InfoTip text="Filter visible edges by their individual transfer value (CRC). The range is the min/max single-transfer value in the full path result. Drag the slider to hide small or large transfers from the visualization." />
+              Route flow: {minCapacity.toFixed(3)} → {maxCapacity.toFixed(3)} CRC
+              <InfoTip text="Filter routes by their flow value (CRC). Each route is a complete source→sink path. Routes with flow outside this range are excluded from the graph and calldata." />
             </label>
-            {cherryPickInfo && (
+            {routeSelectionInfo && (
               <p className="text-xs text-indigo-600 mb-1">
-                Selected: {cherryPickInfo.count}/{cherryPickInfo.total} transfers — {cherryPickInfo.sum.toFixed(3)} CRC total
-                <InfoTip text="Cherry-pick sum: the total CRC across all checked transfers in the table. This is NOT the same as capacity range — capacity range filters by individual transfer size, while this sum is the aggregate of your selection. Use checkboxes in the Transactions tab to select specific transfers for custom calldata." />
+                {routeSelectionInfo.count}/{routeSelectionInfo.total} routes selected — {routeSelectionInfo.flow.toFixed(3)} CRC total
               </p>
             )}
             <SliderPrimitive.Root

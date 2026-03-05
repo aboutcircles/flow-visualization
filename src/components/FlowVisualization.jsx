@@ -1,10 +1,10 @@
-/* eslint-disable react/prop-types, no-unused-vars */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFormData } from '@/hooks/useFormData';
 import { usePathData } from '@/hooks/usePathData';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { decomposeFlow, transfersFromRoutes } from '@/utils/flowDecomposition';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
@@ -24,7 +24,7 @@ const FlowVisualization = () => {
   const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
   const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
   const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
-  const [selectedTransfers, setSelectedTransfers] = useState(new Set());
+  // selectedTransfers removed — route-based selection via selectedRouteIds
   const cytoscapeRef = useRef(null);
   const sankeyRef = useRef(null);
   const autoSimplifiedRef = useRef(false);
@@ -63,7 +63,9 @@ const FlowVisualization = () => {
     maxCapacity,
     setMaxCapacity,
     boundMin,
-    boundMax
+    setBoundMin,
+    boundMax,
+    setBoundMax
   } = usePathData();
   
   // Helper function to get Cytoscape instance
@@ -222,219 +224,103 @@ const FlowVisualization = () => {
     setActiveTab('transactions');
   }, []);
 
-  // Cherry-pick transfer handlers
-  const getTransactionId = (t) => `${t.from}-${t.to}-${t.tokenOwner}`;
+  // --- Route-based flow decomposition ---
+  const [routes, setRoutes] = useState([]);
+  const [selectedRouteIds, setSelectedRouteIds] = useState(new Set());
 
-  // Select ALL transfers when new path data arrives
+  // Decompose into routes when pathData changes
   useEffect(() => {
-    if (!pathData) return;
-    setSelectedTransfers(new Set(pathData.transfers.map(getTransactionId)));
-  }, [pathData]);
-
-  // Remove dead-end chain nodes from a selection set. Iterates until stable.
-  // Returns the cleaned set (new Set with orphans removed).
-  const cleanOrphanChains = useCallback((selectedIds) => {
-    if (!pathData) return selectedIds;
+    if (!pathData || !formData.From || !formData.To) {
+      setRoutes([]);
+      setSelectedRouteIds(new Set());
+      return;
+    }
     const source = formData.From.toLowerCase();
     const sink = formData.To.toLowerCase();
+    const decomposed = decomposeFlow(pathData.transfers, source, sink);
+    setRoutes(decomposed);
+    setSelectedRouteIds(new Set(decomposed.map(r => r.id)));
+  }, [pathData, formData.From, formData.To]);
 
-    let current = new Set(selectedIds);
-    let changed = true;
-
-    while (changed) {
-      changed = false;
-      const remaining = pathData.transfers.filter(t => current.has(getTransactionId(t)));
-
-      const inEdges = new Map();
-      const outEdges = new Map();
-      const allNodes = new Set();
-      for (const t of remaining) {
-        const f = t.from.toLowerCase(), to = t.to.toLowerCase();
-        allNodes.add(f);
-        allNodes.add(to);
-        if (!outEdges.has(f)) outEdges.set(f, []);
-        outEdges.get(f).push(to);
-        if (!inEdges.has(to)) inEdges.set(to, []);
-        inEdges.get(to).push(f);
-      }
-
-      // Find dead-end nodes (no input or no output, excluding source/sink)
-      const deadEnds = new Set();
-      for (const node of allNodes) {
-        if (node === source || node === sink) continue;
-        const inDeg = inEdges.get(node)?.length || 0;
-        const outDeg = outEdges.get(node)?.length || 0;
-        if (inDeg === 0 || outDeg === 0) deadEnds.add(node);
-      }
-
-      if (deadEnds.size === 0) break;
-
-      // Remove transfers involving dead-end nodes
-      for (const t of remaining) {
-        if (deadEnds.has(t.from.toLowerCase()) || deadEnds.has(t.to.toLowerCase())) {
-          current.delete(getTransactionId(t));
-          changed = true;
-        }
-      }
-    }
-
-    return current;
-  }, [pathData, formData]);
-
-  // Slider changes auto-update selection (filter by capacity range + clean orphans)
+  // Slider filters routes by flow threshold
   useEffect(() => {
-    if (!pathData) return;
-    const rangeFiltered = new Set(
-      pathData.transfers
-        .filter(t => {
-          const v = Number(t.value) / 1e18;
-          return v >= minCapacity && v <= maxCapacity;
-        })
-        .map(getTransactionId)
+    if (routes.length === 0) return;
+    setSelectedRouteIds(
+      new Set(
+        routes
+          .filter(r => r.flowNum >= minCapacity && r.flowNum <= maxCapacity)
+          .map(r => r.id)
+      )
     );
-    setSelectedTransfers(cleanOrphanChains(rangeFiltered));
-  }, [pathData, minCapacity, maxCapacity, cleanOrphanChains]);
+  }, [routes, minCapacity, maxCapacity]);
 
-  const handleToggleTransfer = useCallback((transactionId) => {
-    setSelectedTransfers(prev => {
+  // Update slider bounds when routes change
+  useEffect(() => {
+    if (routes.length === 0) return;
+    const flows = routes.map(r => r.flowNum);
+    const min = Math.min(...flows);
+    const max = Math.max(...flows);
+    setBoundMin(min);
+    setBoundMax(max);
+    setMinCapacity(min);
+    setMaxCapacity(max);
+  }, [routes]);
+
+  const handleToggleRoute = useCallback((routeId) => {
+    setSelectedRouteIds(prev => {
       const next = new Set(prev);
-      if (next.has(transactionId)) {
-        next.delete(transactionId);
-        // Clean up orphaned chains created by the removal
-        return cleanOrphanChains(next);
-      } else {
-        next.add(transactionId);
-      }
+      if (next.has(routeId)) next.delete(routeId);
+      else next.add(routeId);
       return next;
     });
-  }, [cleanOrphanChains]);
+  }, []);
 
-  const handleToggleAll = useCallback(() => {
-    if (!pathData) return;
-    setSelectedTransfers(prev => {
-      if (prev.size === pathData.transfers.length) return new Set();
-      return new Set(pathData.transfers.map(getTransactionId));
+  const handleToggleAllRoutes = useCallback(() => {
+    setSelectedRouteIds(prev => {
+      if (prev.size === routes.length) return new Set();
+      return new Set(routes.map(r => r.id));
     });
-  }, [pathData]);
+  }, [routes]);
 
-  // Remove a node and its linear chain from selection
+  // Click node in graph → remove all routes passing through that node
   const handleNodeRemove = useCallback((nodeId) => {
-    if (!pathData) return;
+    const id = nodeId.toLowerCase();
     const source = formData.From.toLowerCase();
     const sink = formData.To.toLowerCase();
-    const id = nodeId.toLowerCase();
-
     if (id === source || id === sink) return;
 
-    // Work with currently selected transfers
-    const currentTransfers = pathData.transfers.filter(t => selectedTransfers.has(getTransactionId(t)));
-
-    const inEdges = new Map();
-    const outEdges = new Map();
-    for (const t of currentTransfers) {
-      const f = t.from.toLowerCase(), to = t.to.toLowerCase();
-      if (!outEdges.has(f)) outEdges.set(f, []);
-      outEdges.get(f).push(to);
-      if (!inEdges.has(to)) inEdges.set(to, []);
-      inEdges.get(to).push(f);
-    }
-
-    const isJunction = (n) =>
-      (inEdges.get(n)?.length || 0) > 1 || (outEdges.get(n)?.length || 0) > 1;
-
-    const nodesToRemove = new Set([id]);
-
-    let cur = id;
-    while (true) {
-      const nexts = outEdges.get(cur) || [];
-      if (nexts.length !== 1) break;
-      const next = nexts[0];
-      if (next === source || next === sink || isJunction(next)) break;
-      nodesToRemove.add(next);
-      cur = next;
-    }
-
-    cur = id;
-    while (true) {
-      const prevs = inEdges.get(cur) || [];
-      if (prevs.length !== 1) break;
-      const prev = prevs[0];
-      if (prev === source || prev === sink || isJunction(prev)) break;
-      nodesToRemove.add(prev);
-      cur = prev;
-    }
-
-    const idsToRemove = new Set();
-    for (const t of currentTransfers) {
-      if (nodesToRemove.has(t.from.toLowerCase()) || nodesToRemove.has(t.to.toLowerCase())) {
-        idsToRemove.add(getTransactionId(t));
-      }
-    }
-
-    setSelectedTransfers(prev => {
+    setSelectedRouteIds(prev => {
       const next = new Set(prev);
-      for (const tid of idsToRemove) next.delete(tid);
+      for (const route of routes) {
+        if (!next.has(route.id)) continue;
+        const passesThrough = route.edges.some(
+          e => e.from === id || e.to === id
+        );
+        if (passesThrough) next.delete(route.id);
+      }
       return next;
     });
-  }, [pathData, formData, selectedTransfers]);
+  }, [routes, formData]);
 
-  // Build filtered path data from selection
-  const filteredPathData = pathData
-    ? (() => {
-        const selected = pathData.transfers.filter(t => selectedTransfers.has(getTransactionId(t)));
-        if (selected.length === pathData.transfers.length) return null; // all selected = use original
-        const receiver = formData.To.toLowerCase();
-        const terminalSum = selected
-          .filter(t => t.to.toLowerCase() === receiver)
-          .reduce((sum, t) => sum + BigInt(t.value), 0n);
-        return {
-          ...pathData,
-          transfers: selected,
-          maxFlow: (terminalSum > 0n ? terminalSum : BigInt(pathData.maxFlow)).toString(),
-        };
-      })()
-    : null;
+  // Build filtered path data from selected routes
+  const filteredPathData = useMemo(() => {
+    if (!pathData || routes.length === 0) return null;
+    if (selectedRouteIds.size === routes.length) return null; // all selected
+    if (selectedRouteIds.size === 0) return { ...pathData, transfers: [], maxFlow: '0' };
+    return {
+      ...pathData,
+      ...transfersFromRoutes(routes, selectedRouteIds, pathData.transfers),
+    };
+  }, [pathData, routes, selectedRouteIds]);
 
-  // Validate selected subset forms a connected path from source to sink
-  const selectionWarning = (() => {
-    if (!filteredPathData || filteredPathData.transfers.length === 0) return null;
-    const source = formData.From.toLowerCase();
-    const sink = formData.To.toLowerCase();
-    const transfers = filteredPathData.transfers;
-
-    // BFS from source — check all nodes are reachable
-    const adj = new Map();
-    const allNodes = new Set();
-    for (const t of transfers) {
-      const f = t.from.toLowerCase(), to = t.to.toLowerCase();
-      allNodes.add(f);
-      allNodes.add(to);
-      if (!adj.has(f)) adj.set(f, []);
-      adj.get(f).push(to);
-    }
-
-    const visited = new Set();
-    const queue = [source];
-    visited.add(source);
-    while (queue.length > 0) {
-      const node = queue.shift();
-      for (const neighbor of (adj.get(node) || [])) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor);
-          queue.push(neighbor);
-        }
-      }
-    }
-
-    const unreachable = [...allNodes].filter(n => !visited.has(n));
-    if (unreachable.length > 0) {
-      return `Disconnected graph: ${unreachable.length} node(s) not reachable from source. This selection won't produce valid calldata.`;
-    }
-    if (!visited.has(sink)) {
-      return 'Sink not reachable from source in the selected transfers.';
-    }
-    return null;
-  })();
+  // Route selection info for left panel
+  const routeSelectionInfo = pathData && selectedRouteIds.size < routes.length ? {
+    count: selectedRouteIds.size,
+    total: routes.length,
+    flow: routes
+      .filter(r => selectedRouteIds.has(r.id))
+      .reduce((s, r) => s + r.flowNum, 0),
+  } : null;
 
   // Handle resize
   const handleMouseDown = useCallback((e) => {
@@ -514,13 +400,7 @@ const FlowVisualization = () => {
             setMaxCapacity={setMaxCapacity}
             boundMin={boundMin}
             boundMax={boundMax}
-            cherryPickInfo={pathData && selectedTransfers.size < pathData.transfers.length ? {
-              count: selectedTransfers.size,
-              total: pathData.transfers.length,
-              sum: pathData.transfers
-                .filter(t => selectedTransfers.has(getTransactionId(t)))
-                .reduce((s, t) => s + Number(t.value) / 1e18, 0),
-            } : null}
+            routeSelectionInfo={routeSelectionInfo}
           />
 
           {/* Right content area */}
@@ -646,19 +526,13 @@ const FlowVisualization = () => {
                 style={{ height: `${tableHeight}px` }}
               >
                 <Tabs className="flex flex-col h-full">
-                  {selectionWarning && (
-                    <div className="mx-4 mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded text-red-700 text-xs flex items-center gap-2">
-                      <AlertTriangle size={14} className="shrink-0" />
-                      {selectionWarning}
-                    </div>
-                  )}
                   <div className="px-4 pt-4">
                     <TabsList>
-                      <TabsTrigger 
-                        isActive={activeTab === 'transactions'} 
+                      <TabsTrigger
+                        isActive={activeTab === 'transactions'}
                         onClick={() => setActiveTab('transactions')}
                       >
-                        Transactions ({pathData.transfers?.length || 0})
+                        Routes ({routes.length})
                       </TabsTrigger>
                       <TabsTrigger 
                         isActive={activeTab === 'parameters'} 
@@ -678,13 +552,13 @@ const FlowVisualization = () => {
                   <div className="flex-1 overflow-auto px-4 pb-4">
                     <TabsContent isActive={activeTab === 'transactions'} className="h-full overflow-hidden">
                       <TransactionTable
-                        transfers={pathData.transfers}
+                        routes={routes}
+                        selectedRouteIds={selectedRouteIds}
+                        onToggleRoute={handleToggleRoute}
+                        onToggleAllRoutes={handleToggleAllRoutes}
                         maxFlow={pathData.maxFlow}
                         onTransactionSelect={handleTransactionSelect}
                         selectedTransactionId={selectedTransactionId}
-                        selectedTransfers={selectedTransfers}
-                        onToggleTransfer={handleToggleTransfer}
-                        onToggleAll={handleToggleAll}
                       />
                     </TabsContent>
                     
