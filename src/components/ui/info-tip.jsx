@@ -32,14 +32,15 @@ const InfoTip = ({ text, size = 14 }) => {
         <Info size={size} />
       </button>
       {visible && (
-        <div
-          className={`absolute z-50 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg pointer-events-none ${
+        <span
+          role="tooltip"
+          className={`absolute z-50 block bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg pointer-events-none ${
             position === 'above' ? 'bottom-full mb-2' : 'top-full mt-2'
           }`}
           style={{ left: '50%', transform: 'translateX(-50%)', width: 'min(240px, 60vw)' }}
         >
           {text}
-        </div>
+        </span>
       )}
     </span>
   );
