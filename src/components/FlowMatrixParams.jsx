@@ -76,7 +76,7 @@ function bytesToHex(bytes) {
   return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const FlowMatrixParams = ({ pathData, sender, showProcessed }) => {
+const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed }) => {
   const [flowMatrix, setFlowMatrix] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
@@ -97,11 +97,8 @@ const FlowMatrixParams = ({ pathData, sender, showProcessed }) => {
     setError(null);
 
     try {
-      // Determine receiver from last transfer
       const transfers = pathData.transfers;
-      if (!transfers || transfers.length === 0) return;
-
-      const receiver = transfers[transfers.length - 1].to;
+      if (!transfers || transfers.length === 0 || !receiver) return;
 
       // Convert string values to bigint for SDK
       const bigintTransfers = transfers.map(t => ({

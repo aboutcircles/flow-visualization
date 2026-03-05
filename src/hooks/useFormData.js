@@ -1,24 +1,41 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ethToWei } from '../services/circlesApi';
 
+const STORAGE_KEY = 'flow-viz-form';
+
+function loadSavedForm() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return null;
+}
+
+const DEFAULTS = {
+  From: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
+  To: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
+  FromTokens: '',
+  ToTokens: '',
+  ExcludedFromTokens: '',
+  ExcludedToTokens: '',
+  crcAmount: '1000',
+  Amount: '1000000000000000000000',
+  WithWrap: true,
+  UseStaging: false,
+  MaxTransfers: '10',
+  IsFromTokensExcluded: false,
+  IsToTokensExcluded: false,
+};
+
 export const useFormData = () => {
-  const [formData, setFormData] = useState({
-    From: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
-    To: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
-    FromTokens: '',
-    ToTokens: '',
-    ExcludedFromTokens: '',
-    ExcludedToTokens: '',
-    crcAmount: '1000',  // Amount in ETH (for UI display)
-    Amount: '1000000000000000000000', // Amount in Wei (calculated from crcAmount)
-    WithWrap: true, // Flag for API endpoint
-    UseStaging: false, // Toggle to use staging endpoint
-    MaxTransfers: '10', // MaxTransfers parameter for staging endpoint
-    IsFromTokensExcluded: false, // Flag to determine if FromTokens are to be excluded
-    IsToTokensExcluded: false, // Flag to determine if ToTokens are to be excluded
-  });
+  const [formData, setFormData] = useState(() => loadSavedForm() || DEFAULTS);
 
   const [formErrors, setFormErrors] = useState({});
+
+  // Persist form data to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(formData)); } catch {}
+  }, [formData]);
 
   // Handle form input changes
   const handleInputChange = (e) => {

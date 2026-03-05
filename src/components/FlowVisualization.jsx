@@ -459,6 +459,7 @@ const FlowVisualization = () => {
                       <FlowMatrixParams
                         pathData={pathData}
                         sender={formData.From}
+                        receiver={formData.To}
                         showProcessed={showProcessed}
                       />
                     </TabsContent>
