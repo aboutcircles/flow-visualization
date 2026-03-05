@@ -165,19 +165,19 @@ export const usePathData = () => {
     loadNodeProfiles();
   }, [pathData, circlesProfiles, config.rendering.features.nodeLabels, config.data]);
 
-  // Set capacity range when pathData changes
+  // Set capacity range only on new search (rawPathData change), not on view toggle
   useEffect(() => {
-    if (!pathData) return;
-    
-    const values = pathData.transfers.map(t => Number(t.value) / 1e18);
+    if (!rawPathData) return;
+
+    const values = rawPathData.transfers.map(t => Number(t.value) / 1e18);
     const trueMin = Math.min(...values);
     const trueMax = Math.max(...values);
-    
+
     setBoundMin(trueMin);
     setBoundMax(trueMax);
     setMinCapacity(trueMin);
     setMaxCapacity(trueMax);
-  }, [pathData]);
+  }, [rawPathData]);
 
   return {
     pathData,
