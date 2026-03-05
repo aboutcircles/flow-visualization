@@ -113,7 +113,7 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed }) => {
       setError(err.message);
       setFlowMatrix(null);
     }
-  }, [pathData, sender]);
+  }, [pathData, sender, receiver]);
 
   useEffect(() => {
     if (writeError) {

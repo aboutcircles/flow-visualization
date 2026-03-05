@@ -55,10 +55,15 @@ export const findPath = async (formData, sdkRpc) => {
   const endpoint = formData.UseStaging ? STAGING_ENDPOINT : API_ENDPOINT;
   const rpc = formData.UseStaging ? new CirclesRpc(STAGING_ENDPOINT) : sdkRpc;
   try {
-    const fromTokensArray = parseAddressList(formData.FromTokens);
-    const toTokensArray = parseAddressList(formData.ToTokens);
-    const excludedFromTokensArray = parseAddressList(formData.ExcludedFromTokens);
-    const excludedToTokensArray = parseAddressList(formData.ExcludedToTokens);
+    // Only send the active mode's token fields — include OR exclude, never both
+    const fromTokensArray = formData.IsFromTokensExcluded
+      ? [] : parseAddressList(formData.FromTokens);
+    const excludedFromTokensArray = formData.IsFromTokensExcluded
+      ? parseAddressList(formData.ExcludedFromTokens) : [];
+    const toTokensArray = formData.IsToTokensExcluded
+      ? [] : parseAddressList(formData.ToTokens);
+    const excludedToTokensArray = formData.IsToTokensExcluded
+      ? parseAddressList(formData.ExcludedToTokens) : [];
 
     const params = {
       from: formData.From,

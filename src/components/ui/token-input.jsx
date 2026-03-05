@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Plus, X } from 'lucide-react';
@@ -9,17 +9,30 @@ import InfoTip from '@/components/ui/info-tip';
 // TokenInput component for handling multiple token inputs
 const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusionToggle, infoTip }) => {
   const [inputValue, setInputValue] = useState('');
+  const prevExcluded = useRef(isExcluded);
+
+  // Clear input field when include/exclude mode toggles
+  useEffect(() => {
+    if (prevExcluded.current !== isExcluded) {
+      setInputValue('');
+      prevExcluded.current = isExcluded;
+    }
+  }, [isExcluded]);
 
   // Parse the current value string into an array of tokens
   const tokens = parseAddressList(value);
 
   const handleAddToken = () => {
-    if (inputValue && inputValue.startsWith('0x')) {
-      // Combine existing tokens with the new one and update parent
-      const updatedTokens = [...tokens, inputValue];
-      onChange(updatedTokens.join(','));
+    const trimmed = inputValue.trim().toLowerCase();
+    if (!trimmed || !trimmed.startsWith('0x')) return;
+    // Deduplicate
+    if (tokens.some(t => t.toLowerCase() === trimmed)) {
       setInputValue('');
+      return;
     }
+    const updatedTokens = [...tokens, inputValue.trim()];
+    onChange(updatedTokens.join(','));
+    setInputValue('');
   };
 
   const handleRemoveToken = (tokenToRemove) => {
