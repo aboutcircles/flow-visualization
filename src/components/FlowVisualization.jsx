@@ -280,6 +280,47 @@ const FlowVisualization = () => {
       })()
     : null;
 
+  // Validate selected subset forms a connected path from source to sink
+  const selectionWarning = (() => {
+    if (!filteredPathData || filteredPathData.transfers.length === 0) return null;
+    const source = formData.From.toLowerCase();
+    const sink = formData.To.toLowerCase();
+    const transfers = filteredPathData.transfers;
+
+    // BFS from source — check all nodes are reachable
+    const adj = new Map();
+    const allNodes = new Set();
+    for (const t of transfers) {
+      const f = t.from.toLowerCase(), to = t.to.toLowerCase();
+      allNodes.add(f);
+      allNodes.add(to);
+      if (!adj.has(f)) adj.set(f, []);
+      adj.get(f).push(to);
+    }
+
+    const visited = new Set();
+    const queue = [source];
+    visited.add(source);
+    while (queue.length > 0) {
+      const node = queue.shift();
+      for (const neighbor of (adj.get(node) || [])) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    const unreachable = [...allNodes].filter(n => !visited.has(n));
+    if (unreachable.length > 0) {
+      return `Disconnected graph: ${unreachable.length} node(s) not reachable from source. This selection won't produce valid calldata.`;
+    }
+    if (!visited.has(sink)) {
+      return 'Sink not reachable from source in the selected transfers.';
+    }
+    return null;
+  })();
+
   // Handle resize
   const handleMouseDown = useCallback((e) => {
     e.preventDefault();
@@ -489,6 +530,12 @@ const FlowVisualization = () => {
                 style={{ height: `${tableHeight}px` }}
               >
                 <Tabs className="flex flex-col h-full">
+                  {selectionWarning && (
+                    <div className="mx-4 mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded text-red-700 text-xs flex items-center gap-2">
+                      <AlertTriangle size={14} className="shrink-0" />
+                      {selectionWarning}
+                    </div>
+                  )}
                   <div className="px-4 pt-4">
                     <TabsList>
                       <TabsTrigger 
