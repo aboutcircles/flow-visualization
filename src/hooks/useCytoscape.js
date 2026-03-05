@@ -20,10 +20,13 @@ export const useCytoscape = ({
   maxCapacity,
   onTooltip,
   onTransactionSelect,
+  onNodeRemove,
   layoutName = 'klay'
 }) => {
   const cyRef = useRef(null);
   const isInitializingRef = useRef(false);
+  const onNodeRemoveRef = useRef(onNodeRemove);
+  onNodeRemoveRef.current = onNodeRemove;
   const { config, updateStats } = usePerformance();
 
   // Initialize graph when pathData changes
@@ -519,6 +522,26 @@ export const useCytoscape = ({
           onTransactionSelect(transactionId);
         }
       });
+
+      // Node click: remove node and its chain from selection
+      if (onNodeRemoveRef.current) {
+        cy.on('click', 'node', (event) => {
+          const node = event.target;
+          if (node.data('isSource') || node.data('isSink') || node.data('isSameSourceSink')) return;
+          onNodeRemoveRef.current?.(node.id());
+        });
+
+        // Visual cue: pointer cursor on removable intermediate nodes
+        cy.on('mouseover', 'node', (event) => {
+          const node = event.target;
+          if (!node.data('isSource') && !node.data('isSink') && !node.data('isSameSourceSink')) {
+            containerRef.current.style.cursor = 'pointer';
+          }
+        });
+        cy.on('mouseout', 'node', () => {
+          containerRef.current.style.cursor = '';
+        });
+      }
 
       const renderTime = performance.now() - startTime;
       updateStats({ renderTime: Math.round(renderTime) });

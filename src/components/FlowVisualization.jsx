@@ -231,29 +231,83 @@ const FlowVisualization = () => {
     setSelectedTransfers(new Set(pathData.transfers.map(getTransactionId)));
   }, [pathData]);
 
-  // Slider changes auto-update selection (filter by capacity range)
+  // Slider changes auto-update selection (filter by capacity range + clean orphans)
   useEffect(() => {
     if (!pathData) return;
-    setSelectedTransfers(
-      new Set(
-        pathData.transfers
-          .filter(t => {
-            const v = Number(t.value) / 1e18;
-            return v >= minCapacity && v <= maxCapacity;
-          })
-          .map(getTransactionId)
-      )
+    const rangeFiltered = new Set(
+      pathData.transfers
+        .filter(t => {
+          const v = Number(t.value) / 1e18;
+          return v >= minCapacity && v <= maxCapacity;
+        })
+        .map(getTransactionId)
     );
-  }, [pathData, minCapacity, maxCapacity]);
+    setSelectedTransfers(cleanOrphanChains(rangeFiltered));
+  }, [pathData, minCapacity, maxCapacity, cleanOrphanChains]);
+
+  // Remove dead-end chain nodes from a selection set. Iterates until stable.
+  // Returns the cleaned set (new Set with orphans removed).
+  const cleanOrphanChains = useCallback((selectedIds) => {
+    if (!pathData) return selectedIds;
+    const source = formData.From.toLowerCase();
+    const sink = formData.To.toLowerCase();
+
+    let current = new Set(selectedIds);
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+      const remaining = pathData.transfers.filter(t => current.has(getTransactionId(t)));
+
+      const inEdges = new Map();
+      const outEdges = new Map();
+      const allNodes = new Set();
+      for (const t of remaining) {
+        const f = t.from.toLowerCase(), to = t.to.toLowerCase();
+        allNodes.add(f);
+        allNodes.add(to);
+        if (!outEdges.has(f)) outEdges.set(f, []);
+        outEdges.get(f).push(to);
+        if (!inEdges.has(to)) inEdges.set(to, []);
+        inEdges.get(to).push(f);
+      }
+
+      // Find dead-end nodes (no input or no output, excluding source/sink)
+      const deadEnds = new Set();
+      for (const node of allNodes) {
+        if (node === source || node === sink) continue;
+        const inDeg = inEdges.get(node)?.length || 0;
+        const outDeg = outEdges.get(node)?.length || 0;
+        if (inDeg === 0 || outDeg === 0) deadEnds.add(node);
+      }
+
+      if (deadEnds.size === 0) break;
+
+      // Remove transfers involving dead-end nodes
+      for (const t of remaining) {
+        if (deadEnds.has(t.from.toLowerCase()) || deadEnds.has(t.to.toLowerCase())) {
+          current.delete(getTransactionId(t));
+          changed = true;
+        }
+      }
+    }
+
+    return current;
+  }, [pathData, formData]);
 
   const handleToggleTransfer = useCallback((transactionId) => {
     setSelectedTransfers(prev => {
       const next = new Set(prev);
-      if (next.has(transactionId)) next.delete(transactionId);
-      else next.add(transactionId);
+      if (next.has(transactionId)) {
+        next.delete(transactionId);
+        // Clean up orphaned chains created by the removal
+        return cleanOrphanChains(next);
+      } else {
+        next.add(transactionId);
+      }
       return next;
     });
-  }, []);
+  }, [cleanOrphanChains]);
 
   const handleToggleAll = useCallback(() => {
     if (!pathData) return;
@@ -262,6 +316,67 @@ const FlowVisualization = () => {
       return new Set(pathData.transfers.map(getTransactionId));
     });
   }, [pathData]);
+
+  // Remove a node and its linear chain from selection
+  const handleNodeRemove = useCallback((nodeId) => {
+    if (!pathData) return;
+    const source = formData.From.toLowerCase();
+    const sink = formData.To.toLowerCase();
+    const id = nodeId.toLowerCase();
+
+    if (id === source || id === sink) return;
+
+    // Work with currently selected transfers
+    const currentTransfers = pathData.transfers.filter(t => selectedTransfers.has(getTransactionId(t)));
+
+    const inEdges = new Map();
+    const outEdges = new Map();
+    for (const t of currentTransfers) {
+      const f = t.from.toLowerCase(), to = t.to.toLowerCase();
+      if (!outEdges.has(f)) outEdges.set(f, []);
+      outEdges.get(f).push(to);
+      if (!inEdges.has(to)) inEdges.set(to, []);
+      inEdges.get(to).push(f);
+    }
+
+    const isJunction = (n) =>
+      (inEdges.get(n)?.length || 0) > 1 || (outEdges.get(n)?.length || 0) > 1;
+
+    const nodesToRemove = new Set([id]);
+
+    let cur = id;
+    while (true) {
+      const nexts = outEdges.get(cur) || [];
+      if (nexts.length !== 1) break;
+      const next = nexts[0];
+      if (next === source || next === sink || isJunction(next)) break;
+      nodesToRemove.add(next);
+      cur = next;
+    }
+
+    cur = id;
+    while (true) {
+      const prevs = inEdges.get(cur) || [];
+      if (prevs.length !== 1) break;
+      const prev = prevs[0];
+      if (prev === source || prev === sink || isJunction(prev)) break;
+      nodesToRemove.add(prev);
+      cur = prev;
+    }
+
+    const idsToRemove = new Set();
+    for (const t of currentTransfers) {
+      if (nodesToRemove.has(t.from.toLowerCase()) || nodesToRemove.has(t.to.toLowerCase())) {
+        idsToRemove.add(getTransactionId(t));
+      }
+    }
+
+    setSelectedTransfers(prev => {
+      const next = new Set(prev);
+      for (const tid of idsToRemove) next.delete(tid);
+      return next;
+    });
+  }, [pathData, formData, selectedTransfers]);
 
   // Build filtered path data from selection
   const filteredPathData = pathData
@@ -483,6 +598,7 @@ const FlowVisualization = () => {
                     minCapacity={minCapacity}
                     maxCapacity={maxCapacity}
                     onTransactionSelect={handleTransactionSelect}
+                    onNodeRemove={handleNodeRemove}
                     selectedTransactionId={selectedTransactionId}
                     onVisualizationModeChange={setVisualizationMode}
                   />

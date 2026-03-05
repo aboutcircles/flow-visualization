@@ -12,7 +12,7 @@ import {
   X
 } from 'lucide-react';
 
-const CytoscapeVisualization = forwardRef(({ 
+const CytoscapeVisualization = forwardRef(({
   pathData,
   formData,
   wrappedTokens,
@@ -22,6 +22,7 @@ const CytoscapeVisualization = forwardRef(({
   minCapacity,
   maxCapacity,
   onTransactionSelect,
+  onNodeRemove,
   selectedTransactionId,
   onVisualizationModeChange
 }, ref) => {
@@ -52,6 +53,7 @@ const CytoscapeVisualization = forwardRef(({
     maxCapacity,
     onTooltip: setTooltip,
     onTransactionSelect,
+    onNodeRemove,
     layoutName
   });
 
