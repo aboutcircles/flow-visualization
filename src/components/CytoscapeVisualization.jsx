@@ -12,7 +12,7 @@ import {
   X
 } from 'lucide-react';
 
-const CytoscapeVisualization = forwardRef(({ 
+const CytoscapeVisualization = forwardRef(({
   pathData,
   formData,
   wrappedTokens,
@@ -22,8 +22,10 @@ const CytoscapeVisualization = forwardRef(({
   minCapacity,
   maxCapacity,
   onTransactionSelect,
+  onNodeRemove,
   selectedTransactionId,
-  onVisualizationModeChange
+  onVisualizationModeChange,
+  showNames = true
 }, ref) => {
   const containerRef = useRef(null);
   const [tooltip, setTooltip] = useState({ text: '', position: null });
@@ -52,7 +54,9 @@ const CytoscapeVisualization = forwardRef(({
     maxCapacity,
     onTooltip: setTooltip,
     onTransactionSelect,
-    layoutName
+    onNodeRemove,
+    layoutName,
+    showNames
   });
 
   // Enhanced highlightPath that also updates local state
@@ -120,7 +124,7 @@ const CytoscapeVisualization = forwardRef(({
   return (
     <div className="relative w-full h-full">
       {/* Cytoscape container */}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="w-full h-full" onContextMenu={(e) => e.preventDefault()} />
       
       {/* Controls overlay */}
       <div className="absolute top-4 left-4 flex flex-col gap-2">

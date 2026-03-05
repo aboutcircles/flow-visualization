@@ -23,7 +23,8 @@ const SankeyVisualization = forwardRef(({
   minCapacity,
   maxCapacity,
   onTransactionSelect,
-  selectedTransactionId
+  selectedTransactionId,
+  showNames = true
 }, ref) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
@@ -289,20 +290,15 @@ const SankeyVisualization = forwardRef(({
     }
 
     // Prepare node labels
+    const shortAddr = (addr) => addr.startsWith('0x') ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
     const nodesWithLabels = nodes.map(node => {
       const profile = nodeProfiles[node.realAddress];
-      let label = profile?.name || 
-                 (node.realAddress.startsWith('0x') 
-                   ? `${node.realAddress.slice(0, 6)}...${node.realAddress.slice(-4)}`
-                   : node.realAddress);
-      
+      let label = (showNames && profile?.name) ? profile.name : shortAddr(node.realAddress);
+
       // For virtual sink, use the same label as the source
       if (node.name === virtualSinkAddress) {
         const sourceProfile = nodeProfiles[sourceAddress];
-        label = sourceProfile?.name || 
-               (sourceAddress.startsWith('0x') 
-                 ? `${sourceAddress.slice(0, 6)}...${sourceAddress.slice(-4)}`
-                 : sourceAddress);
+        label = (showNames && sourceProfile?.name) ? sourceProfile.name : shortAddr(sourceAddress);
       }
       
       return {
@@ -400,7 +396,7 @@ const SankeyVisualization = forwardRef(({
 
     isInitializingRef.current = false;
 
-  }, [pathData, formData, highlightedPath, minCapacity, maxCapacity, wrappedTokens, nodeProfiles, tokenOwnerProfiles, balancesByAccount, config.rendering.features, getTokenColor, onTransactionSelect, determineRenderingStrategy, ref]);
+  }, [pathData, formData, highlightedPath, minCapacity, maxCapacity, wrappedTokens, nodeProfiles, tokenOwnerProfiles, balancesByAccount, config.rendering.features, getTokenColor, onTransactionSelect, determineRenderingStrategy, showNames, ref]);
 
   // Handle resize
   useEffect(() => {

@@ -1,20 +1,29 @@
-import { CirclesData, CirclesRpc } from "@circles-sdk/data";
+import { CirclesData, CirclesRpc as LegacyCirclesRpc } from "@circles-sdk/data";
 import { Profiles } from "@circles-sdk/profiles";
+import { CirclesRpc } from "@aboutcircles/sdk-rpc";
+import {
+  getTokenInfoMapFromPath,
+  getWrappedTokensFromPath,
+  replaceWrappedTokensWithAvatars,
+  shrinkPathValues,
+} from "@aboutcircles/sdk-pathfinder";
 import cacheService from './cacheService';
 
 export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
-export const STAGING_ENDPOINT = 'https://rpc.circlesubi.network/';
+export const STAGING_ENDPOINT = 'https://staging.circlesubi.network/';
 
 
 export const createCirclesClients = () => {
-  const circlesRpc = new CirclesRpc(API_ENDPOINT);
-  const circlesData = new CirclesData(circlesRpc);
+  const legacyRpc = new LegacyCirclesRpc(API_ENDPOINT);
+  const circlesData = new CirclesData(legacyRpc);
   const circlesProfiles = new Profiles(API_ENDPOINT + "profiles/");
-  
+  const sdkRpc = new CirclesRpc(API_ENDPOINT);
+
   return {
-    circlesRpc,
+    circlesRpc: legacyRpc,
     circlesData,
-    circlesProfiles
+    circlesProfiles,
+    sdkRpc
   };
 };
 
@@ -41,76 +50,88 @@ export const ethToWei = (crcAmount) => {
   }
 };
 
-export const findPath = async (formData) => {
-  // Choose RPC endpoint based on staging toggle
+export const findPath = async (formData, sdkRpc) => {
+  // If staging endpoint requested, create a temporary SDK client for it
   const endpoint = formData.UseStaging ? STAGING_ENDPOINT : API_ENDPOINT;
+  const rpc = formData.UseStaging ? new CirclesRpc(STAGING_ENDPOINT) : sdkRpc;
   try {
-    const fromTokensArray = parseAddressList(formData.FromTokens);
-    const toTokensArray = parseAddressList(formData.ToTokens);
-    const excludedFromTokensArray = parseAddressList(formData.ExcludedFromTokens);
-    const excludedToTokensArray = parseAddressList(formData.ExcludedToTokens);
+    // Only send the active mode's token fields — include OR exclude, never both
+    const fromTokensArray = formData.IsFromTokensExcluded
+      ? [] : parseAddressList(formData.FromTokens);
+    const excludedFromTokensArray = formData.IsFromTokensExcluded
+      ? parseAddressList(formData.ExcludedFromTokens) : [];
+    const toTokensArray = formData.IsToTokensExcluded
+      ? [] : parseAddressList(formData.ToTokens);
+    const excludedToTokensArray = formData.IsToTokensExcluded
+      ? parseAddressList(formData.ExcludedToTokens) : [];
 
     const params = {
-      Source: formData.From,
-      Sink: formData.To,
-      TargetFlow: formData.Amount,
+      from: formData.From,
+      to: formData.To,
+      targetFlow: BigInt(formData.Amount),
+      useWrappedBalances: formData.WithWrap,
     };
 
-    if (fromTokensArray.length > 0) {
-      params.FromTokens = fromTokensArray;
-    }
+    if (fromTokensArray.length > 0) params.fromTokens = fromTokensArray;
+    if (toTokensArray.length > 0) params.toTokens = toTokensArray;
+    if (excludedFromTokensArray.length > 0) params.excludeFromTokens = excludedFromTokensArray;
+    if (excludedToTokensArray.length > 0) params.excludeToTokens = excludedToTokensArray;
 
-    if (toTokensArray.length > 0) {
-      params.ToTokens = toTokensArray;
-    }
-
-    if (excludedFromTokensArray.length > 0) {
-      params.ExcludedFromTokens = excludedFromTokensArray;
-    }
-
-    if (excludedToTokensArray.length > 0) {
-      params.ExcludedToTokens = excludedToTokensArray;
-    }
-
-    params.WithWrap = formData.WithWrap;
     // Include MaxTransfers parameter if set
     if (formData.MaxTransfers) {
-      params.MaxTransfers = formData.MaxTransfers;
+      params.maxTransfers = Number(formData.MaxTransfers);
     }
 
-    const requestBody = {
-      jsonrpc: "2.0",
-      id: 0,
-      method: "circlesV2_findPath",
-      params: [params]
+    console.log('SDK findPath params:', params);
+
+    const result = await rpc.pathfinder.findPath(params);
+
+    // SDK returns bigints — convert to strings for backward compat with visualization
+    return {
+      maxFlow: result.maxFlow.toString(),
+      transfers: result.transfers.map(t => ({
+        ...t,
+        value: t.value.toString(),
+      })),
     };
-
-    console.log('Sending JSON-RPC request:', requestBody);
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API error: ${response.status} ${response.statusText}\n${errorText}`);
-    }
-
-    const responseData = await response.json();
-
-    if (responseData.error) {
-      throw new Error(`JSON-RPC error: ${responseData.error.message || JSON.stringify(responseData.error)}`);
-    }
-
-    return responseData.result;
   } catch (err) {
-    console.error('Fetch error:', err);
+    console.error('SDK findPath error:', err);
     throw err;
   }
+};
+
+export const processPath = async (rawPath, sourceAddress) => {
+  // Re-parse values to bigints for SDK processing
+  const pathWithBigInts = {
+    maxFlow: BigInt(rawPath.maxFlow),
+    transfers: rawPath.transfers.map(t => ({
+      ...t,
+      value: BigInt(t.value),
+    })),
+  };
+
+  const tokenInfoMap = await getTokenInfoMapFromPath(sourceAddress, API_ENDPOINT, pathWithBigInts);
+  const wrappedTokensInPath = getWrappedTokensFromPath(pathWithBigInts, tokenInfoMap);
+  const hasWrappedTokens = Object.keys(wrappedTokensInPath).length > 0;
+
+  let processed = pathWithBigInts;
+  if (hasWrappedTokens) {
+    processed = replaceWrappedTokensWithAvatars(processed, tokenInfoMap);
+  }
+
+  // Convert back to strings for visualization
+  return {
+    maxFlow: processed.maxFlow.toString(),
+    transfers: processed.transfers.map(t => ({
+      ...t,
+      value: t.value.toString(),
+    })),
+    _meta: {
+      hasWrappedTokens,
+      wrappedTokenCount: Object.keys(wrappedTokensInPath).length,
+      tokenInfoMap: Object.fromEntries(tokenInfoMap),
+    },
+  };
 };
 
 // Optimized version - only fetch what we need

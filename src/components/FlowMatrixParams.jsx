@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X } from "lucide-react";
-import { generateFlowMatrixParams } from "@/lib/utils";
+import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X, AlertTriangle } from "lucide-react";
+import { createFlowMatrix } from "@aboutcircles/sdk-pathfinder";
 import { encodeFunctionData } from "viem";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { gnosis } from "wagmi/chains";
@@ -70,8 +70,15 @@ const OPERATE_FLOW_MATRIX_ABI = [
   },
 ];
 
-const FlowMatrixParams = ({ pathData, sender }) => {
-  const [params, setParams] = useState(null);
+const HUB_V2_ADDRESS = '0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8';
+
+function bytesToHex(bytes) {
+  return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltered }) => {
+  const [flowMatrix, setFlowMatrix] = useState(null);
+  const [error, setError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
   const [expanded, setExpanded] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
@@ -87,9 +94,26 @@ const FlowMatrixParams = ({ pathData, sender }) => {
 
   useEffect(() => {
     if (!pathData || !sender) return;
-    const flowParams = generateFlowMatrixParams(pathData, sender);
-    setParams(flowParams);
-  }, [pathData, sender]);
+    setError(null);
+
+    try {
+      const transfers = pathData.transfers;
+      if (!transfers || transfers.length === 0 || !receiver) return;
+
+      // Convert string values to bigint for SDK
+      const bigintTransfers = transfers.map(t => ({
+        ...t,
+        value: BigInt(t.value),
+      }));
+
+      const fm = createFlowMatrix(sender, receiver, BigInt(pathData.maxFlow), bigintTransfers);
+      setFlowMatrix(fm);
+    } catch (err) {
+      console.error('Error generating flow matrix:', err);
+      setError(err.message);
+      setFlowMatrix(null);
+    }
+  }, [pathData, sender, receiver]);
 
   useEffect(() => {
     if (writeError) {
@@ -103,45 +127,59 @@ const FlowMatrixParams = ({ pathData, sender }) => {
     }
   }, [isConfirmed, hash]);
 
+  const getCalldata = () => {
+    if (!flowMatrix) return null;
+
+    const streamsWithHex = flowMatrix.streams.map(s => ({
+      sourceCoordinate: s.sourceCoordinate,
+      flowEdgeIds: s.flowEdgeIds,
+      data: s.data instanceof Uint8Array ? bytesToHex(s.data) : (s.data || '0x'),
+    }));
+
+    return encodeFunctionData({
+      abi: OPERATE_FLOW_MATRIX_ABI,
+      functionName: "operateFlowMatrix",
+      args: [
+        flowMatrix.flowVertices,
+        flowMatrix.flowEdges.map(e => ({ streamSinkId: e.streamSinkId, amount: BigInt(e.amount) })),
+        streamsWithHex,
+        flowMatrix.packedCoordinates,
+      ],
+    });
+  };
+
+  const getJsonParams = () => {
+    if (!flowMatrix) return null;
+    return {
+      _flowVertices: flowMatrix.flowVertices,
+      _flow: flowMatrix.flowEdges.map(e => ({ streamSinkId: e.streamSinkId, amount: e.amount.toString() })),
+      _streams: flowMatrix.streams.map(s => ({
+        sourceCoordinate: s.sourceCoordinate,
+        flowEdgeIds: [...s.flowEdgeIds],
+        data: s.data instanceof Uint8Array ? bytesToHex(s.data) : (s.data || '0x'),
+      })),
+      _packedCoordinates: flowMatrix.packedCoordinates,
+    };
+  };
+
   const copyToClipboard = async (type) => {
-    if (!params) return;
+    if (!flowMatrix) return;
 
     let textToCopy;
-
-    if (type === "json") {
-      textToCopy = JSON.stringify(
-        {
-          method: "operateFlowMatrix",
-          params,
-        },
-        null,
-        2,
-      );
-    } else if (type === "calldata") {
-      try {
-        const calldata = encodeFunctionData({
-          abi: OPERATE_FLOW_MATRIX_ABI,
-          functionName: "operateFlowMatrix",
-          args: [
-            params._flowVertices,
-            params._flow,
-            params._streams,
-            params._packedCoordinates,
-          ],
-        });
-        textToCopy = calldata;
-      } catch (error) {
-        console.error("Error generating calldata:", error);
-        return;
+    try {
+      if (type === "json") {
+        textToCopy = JSON.stringify({ method: "operateFlowMatrix", params: getJsonParams() }, null, 2);
+      } else if (type === "calldata") {
+        textToCopy = getCalldata();
       }
+    } catch (err) {
+      console.error("Error generating " + type + ":", err);
+      return;
     }
 
     await navigator.clipboard.writeText(textToCopy);
     setCopied((prev) => ({ ...prev, [type]: true }));
-
-    setTimeout(() => {
-      setCopied((prev) => ({ ...prev, [type]: false }));
-    }, 2000);
+    setTimeout(() => setCopied((prev) => ({ ...prev, [type]: false })), 2000);
   };
 
   const handleConnectWallet = (connector) => {
@@ -150,39 +188,35 @@ const FlowMatrixParams = ({ pathData, sender }) => {
   };
 
   const getWalletInfo = (connector) => {
-    // Check the connector's actual provider
     const provider = connector.provider;
-    
+
     if (typeof window !== 'undefined' && provider) {
-      // Check for Rabby
       if (provider.isRabby || window.rabby === provider) {
         return { name: 'Rabby Wallet', detected: true };
       }
-      // Check for MetaMask (but not if it's Rabby pretending to be MetaMask)
       if (provider.isMetaMask && !provider.isRabby) {
         return { name: 'MetaMask', detected: true };
       }
-      // Check for Coinbase Wallet
       if (provider.isCoinbaseWallet) {
         return { name: 'Coinbase Wallet', detected: true };
       }
-      // Check for Brave Wallet
       if (provider.isBraveWallet) {
         return { name: 'Brave Wallet', detected: true };
       }
     }
-    
-    // Fallback to connector name
-    return { 
-      name: connector.name === 'Injected' ? 'Browser Wallet' : connector.name, 
-      detected: connector.name !== 'WalletConnect' 
+
+    return {
+      name: connector.name === 'Injected' ? 'Browser Wallet' : connector.name,
+      detected: connector.name !== 'WalletConnect'
     };
   };
 
   const handleExecuteTransaction = async () => {
+    if (!flowMatrix) return;
+
+    const params = getJsonParams();
     if (!params) return;
 
-    // Check if we're on Gnosis Chain
     if (chain?.id !== gnosis.id) {
       try {
         await switchChain({ chainId: gnosis.id });
@@ -199,8 +233,12 @@ const FlowMatrixParams = ({ pathData, sender }) => {
         functionName: "operateFlowMatrix",
         args: [
           params._flowVertices,
-          params._flow,
-          params._streams,
+          params._flow.map(e => ({ streamSinkId: e.streamSinkId, amount: BigInt(e.amount) })),
+          params._streams.map(s => ({
+            sourceCoordinate: s.sourceCoordinate,
+            flowEdgeIds: s.flowEdgeIds,
+            data: s.data || '0x',
+          })),
           params._packedCoordinates,
         ],
       });
@@ -209,27 +247,35 @@ const FlowMatrixParams = ({ pathData, sender }) => {
     }
   };
 
-  if (!params) return null;
+  if (error) {
+    return (
+      <Card className="mt-4">
+        <CardContent className="pt-4">
+          <p className="text-red-600 text-sm">Flow matrix error: {error}</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
+  if (!flowMatrix) return null;
+
+  const params = getJsonParams();
   const shortParams = {
     ...params,
-    _flowVertices:
-      params._flowVertices.length > 3
-        ? [...params._flowVertices.slice(0, 3), "..."]
-        : params._flowVertices,
-    _flow:
-      params._flow.length > 3
-        ? [...params._flow.slice(0, 3), "..."]
-        : params._flow,
+    _flowVertices: params._flowVertices.length > 3 ? [...params._flowVertices.slice(0, 3), "..."] : params._flowVertices,
+    _flow: params._flow.length > 3 ? [...params._flow.slice(0, 3), "..."] : params._flow,
   };
 
   const formattedJson = expanded
     ? JSON.stringify({ method: "operateFlowMatrix", params }, null, 2)
-    : JSON.stringify(
-        { method: "operateFlowMatrix", params: shortParams },
-        null,
-        2,
-      );
+    : JSON.stringify({ method: "operateFlowMatrix", params: shortParams }, null, 2);
+
+  let calldata = null;
+  try {
+    calldata = getCalldata();
+  } catch (err) {
+    // will show error inline
+  }
 
   const isWrongChain = isConnected && chain?.id !== gnosis.id;
   const canExecute = isConnected && !isWrongChain && !isWritePending && !isConfirming;
@@ -237,12 +283,24 @@ const FlowMatrixParams = ({ pathData, sender }) => {
   return (
     <Card className="mt-4">
       <CardContent className="pt-4">
+        {!showProcessed && (
+          <div className="flex items-center gap-2 mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-xs">
+            <AlertTriangle size={14} />
+            <span>Raw path — may contain wrapper addresses. Enable &quot;Resolve Wrappers&quot; for executable calldata.</span>
+          </div>
+        )}
+        {isFiltered && (
+          <div className="flex items-center gap-2 mb-3 p-2 bg-indigo-50 border border-indigo-200 rounded text-indigo-800 text-xs">
+            <span>Filtered: using {pathData.transfers.length} transfer{pathData.transfers.length !== 1 ? 's' : ''} from selected routes.</span>
+          </div>
+        )}
         <div className="flex justify-between items-center mb-2">
           <div className="flex items-center gap-2">
             <Code size={18} className="text-blue-500" />
             <h2 className="text-lg font-semibold">
-              operateFlowMatrix Parameters
+              operateFlowMatrix
             </h2>
+            <span className="text-xs text-gray-400 font-mono">{HUB_V2_ADDRESS.slice(0, 10)}…</span>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button
@@ -251,7 +309,7 @@ const FlowMatrixParams = ({ pathData, sender }) => {
               className="flex items-center gap-1"
             >
               {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              {expanded ? "Show Less" : "Show Full Params"}
+              {expanded ? "Less" : "Full"}
             </Button>
             <Button
               onClick={() => copyToClipboard("json")}
@@ -259,7 +317,7 @@ const FlowMatrixParams = ({ pathData, sender }) => {
               className="flex items-center gap-1"
             >
               {copied.json ? <Check size={16} /> : <Copy size={16} />}
-              {copied.json ? "Copied!" : "Copy JSON"}
+              {copied.json ? "Copied!" : "JSON"}
             </Button>
             <Button
               onClick={() => copyToClipboard("calldata")}
@@ -267,7 +325,7 @@ const FlowMatrixParams = ({ pathData, sender }) => {
               className="flex items-center gap-1"
             >
               {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
-              {copied.calldata ? "Copied!" : "Copy Calldata"}
+              {copied.calldata ? "Copied!" : "Calldata"}
             </Button>
             {!isConnected ? (
               <Button
@@ -307,20 +365,20 @@ const FlowMatrixParams = ({ pathData, sender }) => {
             )}
           </div>
         </div>
-        
+
         {isConnected && (
           <div className="mb-2 text-sm text-gray-600">
-            Connected: {address?.slice(0, 6)}...{address?.slice(-4)} 
+            Connected: {address?.slice(0, 6)}...{address?.slice(-4)}
             {chain && ` (${chain.name})`}
           </div>
         )}
-        
+
         {writeError && (
           <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm">
             Error: {writeError.message}
           </div>
         )}
-        
+
         {hash && (
           <div className="mb-2 p-2 bg-green-100 text-green-700 rounded text-sm">
             Transaction submitted: {hash.slice(0, 10)}...{hash.slice(-8)}
@@ -328,12 +386,20 @@ const FlowMatrixParams = ({ pathData, sender }) => {
             {isConfirmed && " - Confirmed!"}
           </div>
         )}
-        
+
         <div className="relative">
           <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-96 font-mono text-sm">
             <pre className="whitespace-pre-wrap text-left">{formattedJson}</pre>
           </div>
         </div>
+        {calldata && (
+          <div className="mt-3">
+            <p className="text-xs text-gray-500 mb-1">Encoded calldata ({calldata.length} chars)</p>
+            <div className="bg-gray-50 p-2 rounded-md overflow-auto max-h-24 font-mono text-xs text-gray-600 break-all">
+              {calldata.slice(0, 200)}{calldata.length > 200 ? '…' : ''}
+            </div>
+          </div>
+        )}
 
         {/* Wallet Selection Modal */}
         {showWalletModal && (
@@ -365,9 +431,9 @@ const FlowMatrixParams = ({ pathData, sender }) => {
                 })}
               </div>
               <p className="text-xs text-gray-500 mt-4 text-center">
-                {window?.rabby 
-                  ? '✓ Rabby Wallet is installed and ready' 
-                  : window?.ethereum?.isMetaMask 
+                {window?.rabby
+                  ? '✓ Rabby Wallet is installed and ready'
+                  : window?.ethereum?.isMetaMask
                   ? '✓ MetaMask is installed and ready'
                   : window?.ethereum
                   ? '✓ Wallet detected'

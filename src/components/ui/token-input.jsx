@@ -1,25 +1,50 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Plus, X } from 'lucide-react';
 import { parseAddressList } from '@/services/circlesApi';
 import ToggleSwitch from '@/components/ui/toggle-switch';
+import InfoTip from '@/components/ui/info-tip';
 
-// TokenInput component for handling multiple token inputs
-const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusionToggle }) => {
+const TokenInput = forwardRef(({ value, onChange, placeholder, label, isExcluded, onExclusionToggle, infoTip }, ref) => {
   const [inputValue, setInputValue] = useState('');
+  const prevExcluded = useRef(isExcluded);
+
+  // Clear input field when include/exclude mode toggles
+  useEffect(() => {
+    if (prevExcluded.current !== isExcluded) {
+      setInputValue('');
+      prevExcluded.current = isExcluded;
+    }
+  }, [isExcluded]);
 
   // Parse the current value string into an array of tokens
   const tokens = parseAddressList(value);
 
   const handleAddToken = () => {
-    if (inputValue && inputValue.startsWith('0x')) {
-      // Combine existing tokens with the new one and update parent
-      const updatedTokens = [...tokens, inputValue];
-      onChange(updatedTokens.join(','));
+    const trimmed = inputValue.trim().toLowerCase();
+    if (!trimmed || !trimmed.startsWith('0x')) return null;
+    if (tokens.some(t => t.toLowerCase() === trimmed)) {
       setInputValue('');
+      return null;
     }
+    const updatedTokens = [...tokens, inputValue.trim()];
+    const newValue = updatedTokens.join(',');
+    onChange(newValue);
+    setInputValue('');
+    return newValue;
   };
+
+  // Expose getPending (returns typed text) and flushPending (adds it, returns new list)
+  useImperativeHandle(ref, () => ({
+    getPending: () => {
+      const trimmed = inputValue.trim().toLowerCase();
+      if (!trimmed || !trimmed.startsWith('0x')) return null;
+      if (tokens.some(t => t.toLowerCase() === trimmed)) return null;
+      return trimmed;
+    },
+    flushPending: handleAddToken,
+  }));
 
   const handleRemoveToken = (tokenToRemove) => {
     const updatedTokens = tokens.filter(token => token !== tokenToRemove);
@@ -36,11 +61,14 @@ const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusi
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="block text-sm font-medium">{label}</label>
+        <label className="block text-sm font-medium">
+          {label}
+          {infoTip && <InfoTip text={infoTip} />}
+        </label>
         <ToggleSwitch
           isEnabled={isExcluded}
           onToggle={onExclusionToggle}
-          label={isExcluded ? "Is Excluding" : "Is Including"}
+          label={isExcluded ? "Exclude mode" : "Include mode"}
         />
       </div>
       <div className="flex mb-2">
@@ -79,6 +107,6 @@ const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusi
       )}
     </div>
   );
-};
+});
 
 export default TokenInput;

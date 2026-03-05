@@ -1,10 +1,10 @@
-/* eslint-disable react/prop-types, no-unused-vars */
-/* eslint-disable react/prop-types, no-unused-vars */
-import React, { useState } from 'react';
+import React from 'react';
 import { Card } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import PathFinderForm from './PathFinderForm';
 import GraphPerformanceControls from './GraphPerformanceControls';
+import InfoTip from '@/components/ui/info-tip';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 const CollapsibleLeftPanel = ({
   isCollapsed,
@@ -20,14 +20,19 @@ const CollapsibleLeftPanel = ({
   isLoading,
   error,
   pathData,
+  showProcessed,
+  setShowProcessed,
+  processedPathData,
+  processingMeta,
   minCapacity,
   setMinCapacity,
   maxCapacity,
   setMaxCapacity,
   boundMin,
-  boundMax
+  boundMax,
+  routeSelectionInfo
 }) => {
-  const [expandedSections, setExpandedSections] = useState({
+  const [expandedSections, setExpandedSections] = usePersistedState('expanded-sections', {
     form: true,
     performance: true
   });
@@ -96,6 +101,7 @@ const CollapsibleLeftPanel = ({
                 setMaxCapacity={setMaxCapacity}
                 boundMin={boundMin}
                 boundMax={boundMax}
+                routeSelectionInfo={routeSelectionInfo}
               />
             )}
           </div>
@@ -123,6 +129,38 @@ const CollapsibleLeftPanel = ({
               <Card className="p-4">
                 <p className="text-sm font-medium">Max Flow</p>
                 <p className="text-lg">{(Number(pathData.maxFlow) / 1e18).toFixed(6)}</p>
+              </Card>
+            </div>
+          )}
+
+          {/* SDK Post-Processing Toggle */}
+          {pathData && processedPathData && (
+            <div className="p-4 pt-0">
+              <Card className="p-4">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm font-medium">
+                    Resolve Wrappers
+                    <InfoTip text="Display option only — does not change the path. When ON, wrapper contract addresses in the graph are replaced with the underlying avatar addresses, showing the path as it would execute on-chain." />
+                  </p>
+                  <button
+                    onClick={() => setShowProcessed(!showProcessed)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      showProcessed ? 'bg-blue-600' : 'bg-gray-300'
+                    }`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      showProcessed ? 'translate-x-4' : 'translate-x-0.5'
+                    }`} />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500">
+                  {showProcessed ? 'Wrapper addresses → avatar addresses' : 'Raw pathfinder output'}
+                </p>
+                {processingMeta?.hasWrappedTokens && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    {processingMeta.wrappedTokenCount} wrapped token{processingMeta.wrappedTokenCount !== 1 ? 's' : ''} in path
+                  </p>
+                )}
               </Card>
             </div>
           )}

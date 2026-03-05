@@ -20,10 +20,14 @@ export const useCytoscape = ({
   maxCapacity,
   onTooltip,
   onTransactionSelect,
-  layoutName = 'klay'
+  onNodeRemove,
+  layoutName = 'klay',
+  showNames = true
 }) => {
   const cyRef = useRef(null);
   const isInitializingRef = useRef(false);
+  const onNodeRemoveRef = useRef(onNodeRemove);
+  onNodeRemoveRef.current = onNodeRemove;
   const { config, updateStats } = usePerformance();
 
   // Initialize graph when pathData changes
@@ -157,7 +161,8 @@ export const useCytoscape = ({
       // Add label
       if (config.rendering.features.nodeLabels) {
         const profile = nodeProfiles[id];
-        nodeData.label = profile?.name || `${id.slice(0, 6)}...${id.slice(-4)}`;
+        const shortAddr = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        nodeData.label = (showNames && profile?.name) ? profile.name : shortAddr;
       }
 
       return { data: nodeData };
@@ -520,6 +525,41 @@ export const useCytoscape = ({
         }
       });
 
+      // Right-click node/edge: copy address to clipboard
+      const copyToClipboard = (text, position) => {
+        navigator.clipboard.writeText(text).then(() => {
+          onTooltip({ text: `Copied: ${text}`, position: { x: position.x, y: position.y } });
+          setTimeout(() => onTooltip({ text: '', position: null }), 1500);
+        });
+      };
+      cy.on('cxttap', 'node', (event) => {
+        copyToClipboard(event.target.id(), event.renderedPosition);
+      });
+      cy.on('cxttap', 'edge', (event) => {
+        const d = event.target.data();
+        copyToClipboard(d.tokenOwner || `${d.source}→${d.target}`, event.renderedPosition);
+      });
+
+      // Node click: remove node and its chain from selection
+      if (onNodeRemoveRef.current) {
+        cy.on('click', 'node', (event) => {
+          const node = event.target;
+          if (node.data('isSource') || node.data('isSink') || node.data('isSameSourceSink')) return;
+          onNodeRemoveRef.current?.(node.id());
+        });
+
+        // Visual cue: pointer cursor on removable intermediate nodes
+        cy.on('mouseover', 'node', (event) => {
+          const node = event.target;
+          if (!node.data('isSource') && !node.data('isSink') && !node.data('isSameSourceSink')) {
+            containerRef.current.style.cursor = 'pointer';
+          }
+        });
+        cy.on('mouseout', 'node', () => {
+          containerRef.current.style.cursor = '';
+        });
+      }
+
       const renderTime = performance.now() - startTime;
       updateStats({ renderTime: Math.round(renderTime) });
 
@@ -583,24 +623,21 @@ export const useCytoscape = ({
     });
   }, [config.rendering.features]);
 
-  // Update node labels when profiles change
+  // Update node labels when profiles or showNames changes
   useEffect(() => {
     if (!config.rendering.features.nodeLabels || !cyRef.current) return;
-    
+
     const cy = cyRef.current;
-    if (Object.keys(nodeProfiles).length === 0) return;
 
     cy.batch(() => {
-      Object.entries(nodeProfiles).forEach(([addr, profile]) => {
-        if (profile?.name) {
-          const node = cy.getElementById(addr);
-          if (!node.empty()) {
-            node.data('label', profile.name);
-          }
-        }
+      cy.nodes().forEach((node) => {
+        const id = node.id();
+        const profile = nodeProfiles[id];
+        const shortAddr = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        node.data('label', (showNames && profile?.name) ? profile.name : shortAddr);
       });
     });
-  }, [nodeProfiles, config.rendering.features.nodeLabels]);
+  }, [nodeProfiles, showNames, config.rendering.features.nodeLabels]);
 
   // Update edge gradients based on capacity
   useEffect(() => {
@@ -664,22 +701,8 @@ export const useCytoscape = ({
     });
   }, [balancesByAccount, config.rendering.features]);
 
-  // Edge filtering
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-
-    cy.batch(() => {
-      cy.edges().forEach(edge => {
-        const v = edge.data('flowValue');
-        if (v < minCapacity || v > maxCapacity) {
-          edge.hide();
-        } else {
-          edge.show();
-        }
-      });
-    });
-  }, [minCapacity, maxCapacity]);
+  // Edge filtering removed — slider now drives transfer selection upstream,
+  // which changes the pathData prop, causing graph re-render with filtered data.
 
   // Highlight transaction
   const highlightTransaction = useCallback((transactionId) => {

@@ -1,136 +1,141 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
-const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTransactionId }) => {
-  const [sortConfig, setSortConfig] = useState({
-    key: null,
-    direction: 'ascending'
-  });
+const TransactionTable = ({
+  routes,
+  selectedRouteIds,
+  onToggleRoute,
+  onToggleAllRoutes,
+  maxFlow,
+  onTransactionSelect,
+  selectedTransactionId,
+  nodeProfiles,
+  showNames = true
+}) => {
+  const [expandedRoutes, setExpandedRoutes] = useState(new Set());
 
-  // Format value to show in scientific notation if very small
   const formatValue = (value) => {
     const num = Number(value) / 1e18;
-    if (num < 0.000001) {
-      return num.toExponential(6);
-    }
+    if (num < 0.000001) return num.toExponential(6);
     return num.toFixed(6);
   };
 
-  // Calculate and format fraction as percentage
   const calculateFraction = (value) => {
     return ((Number(value) / Number(maxFlow)) * 100).toFixed(2) + '%';
   };
 
-  // Sorting function
-  const sortTransfers = (transfers) => {
-    if (!sortConfig.key) return transfers;
-
-    return [...transfers].sort((a, b) => {
-      if (sortConfig.key === 'value' || sortConfig.key === 'fraction') {
-        const aValue = Number(sortConfig.key === 'value' ? a.value : (a.value / maxFlow));
-        const bValue = Number(sortConfig.key === 'value' ? b.value : (b.value / maxFlow));
-        return sortConfig.direction === 'ascending' ? aValue - bValue : bValue - aValue;
-      }
-      
-      if (a[sortConfig.key] < b[sortConfig.key]) {
-        return sortConfig.direction === 'ascending' ? -1 : 1;
-      }
-      if (a[sortConfig.key] > b[sortConfig.key]) {
-        return sortConfig.direction === 'ascending' ? 1 : -1;
-      }
-      return 0;
+  const toggleExpand = (routeId) => {
+    setExpandedRoutes(prev => {
+      const next = new Set(prev);
+      if (next.has(routeId)) next.delete(routeId);
+      else next.add(routeId);
+      return next;
     });
   };
 
-  // Handle sorting
-  const requestSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
+  const shortAddr = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+
+  const displayAddr = (addr) => {
+    if (!showNames || !nodeProfiles) return shortAddr(addr);
+    const profile = nodeProfiles[addr.toLowerCase()];
+    if (!profile?.name) return shortAddr(addr);
+    const name = profile.name;
+    return name.length > 16 ? name.slice(0, 15) + '…' : name;
   };
 
-  // Get sort direction icon
-  const getSortIcon = (columnKey) => {
-    if (sortConfig.key !== columnKey) {
-      return <ChevronDown className="opacity-20" size={16} />;
-    }
-    return sortConfig.direction === 'ascending' ? 
-      <ChevronUp className="text-blue-500" size={16} /> : 
-      <ChevronDown className="text-blue-500" size={16} />;
-  };
-
-  // Generate unique ID for a transaction
-  const getTransactionId = (transfer) => `${transfer.from}-${transfer.to}-${transfer.tokenOwner}`;
-
-  const sortedTransfers = sortTransfers(transfers);
+  // Sort routes by flow descending
+  const sortedRoutes = [...routes].sort((a, b) => b.flowNum - a.flowNum);
 
   return (
-    <div className="w-full overflow-x-auto shadow-sm rounded-lg border">
+    <div className="w-full overflow-auto shadow-sm rounded-lg border h-full">
       <table className="w-full text-sm text-left">
-        <thead className="bg-gray-50 text-gray-600">
+        <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
           <tr>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('from')}
-            >
-              <div className="flex items-center gap-1">
-                From {getSortIcon('from')}
-              </div>
+            <th className="px-3 py-3 w-10">
+              <input
+                type="checkbox"
+                checked={selectedRouteIds.size === routes.length && routes.length > 0}
+                ref={(el) => { if (el) el.indeterminate = selectedRouteIds.size > 0 && selectedRouteIds.size < routes.length; }}
+                onChange={onToggleAllRoutes}
+                className="rounded border-gray-300"
+                title="Select all / none"
+              />
             </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('to')}
-            >
-              <div className="flex items-center gap-1">
-                To {getSortIcon('to')}
-              </div>
-            </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('tokenOwner')}
-            >
-              <div className="flex items-center gap-1">
-                Token {getSortIcon('tokenOwner')}
-              </div>
-            </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('value')}
-            >
-              <div className="flex items-center gap-1">
-                Value {getSortIcon('value')}
-              </div>
-            </th>
-            <th 
-              className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => requestSort('fraction')}
-            >
-              <div className="flex items-center gap-1">
-                Fraction {getSortIcon('fraction')}
-              </div>
-            </th>
+            <th className="px-3 py-3 w-8"></th>
+            <th className="px-4 py-3">Route</th>
+            <th className="px-4 py-3">Hops</th>
+            <th className="px-4 py-3">Flow (CRC)</th>
+            <th className="px-4 py-3">% of Max</th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {sortedTransfers.map((transfer) => {
-            const transactionId = getTransactionId(transfer);
+          {sortedRoutes.map((route) => {
+            const isSelected = selectedRouteIds.has(route.id);
+            const isExpanded = expandedRoutes.has(route.id);
+            const path = route.edges.map(e => displayAddr(e.from));
+            path.push(displayAddr(route.edges[route.edges.length - 1].to));
+
             return (
-              <tr 
-                key={transactionId}
-                className={`
-                  hover:bg-gray-50 cursor-pointer
-                  ${selectedTransactionId === transactionId ? 'bg-blue-50' : ''}
-                `}
-                onClick={() => onTransactionSelect(transactionId)}
-              >
-                <td className="px-6 py-4 font-mono text-xs break-all">{transfer.from}</td>
-                <td className="px-6 py-4 font-mono text-xs break-all">{transfer.to}</td>
-                <td className="px-6 py-4 font-mono text-xs break-all">{transfer.tokenOwner}</td>
-                <td className="px-6 py-4">{formatValue(transfer.value)}</td>
-                <td className="px-6 py-4">{calculateFraction(transfer.value)}</td>
-              </tr>
+              <React.Fragment key={route.id}>
+                <tr
+                  className={`
+                    hover:bg-gray-50 cursor-pointer
+                    ${!isSelected ? 'opacity-40' : ''}
+                  `}
+                >
+                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => onToggleRoute(route.id)}
+                      className="rounded border-gray-300"
+                    />
+                  </td>
+                  <td
+                    className="px-3 py-3 cursor-pointer"
+                    onClick={() => toggleExpand(route.id)}
+                  >
+                    {isExpanded
+                      ? <ChevronDown size={14} className="text-gray-400" />
+                      : <ChevronRight size={14} className="text-gray-400" />
+                    }
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-xs text-gray-600 ${showNames ? '' : 'font-mono'}`}
+                    onClick={() => toggleExpand(route.id)}
+                  >
+                    {path.join(' → ')}
+                  </td>
+                  <td className="px-4 py-3 text-center">{route.edges.length}</td>
+                  <td className="px-4 py-3 font-medium">{formatValue(route.flow)}</td>
+                  <td className="px-4 py-3">{calculateFraction(route.flow)}</td>
+                </tr>
+                {isExpanded && route.edges.map((edge, i) => {
+                  const edgeId = `${edge.from}-${edge.to}-${edge.tokenOwner}`;
+                  return (
+                    <tr
+                      key={`${route.id}-${i}`}
+                      className={`
+                        bg-gray-50 text-xs
+                        ${selectedTransactionId === edgeId ? 'bg-blue-50' : ''}
+                      `}
+                      onClick={() => onTransactionSelect(edgeId)}
+                    >
+                      <td></td>
+                      <td className="pl-6 pr-2 py-2 text-gray-300">↳</td>
+                      <td className="px-4 py-2 break-all" colSpan={2}>
+                        <span className={`text-gray-500 ${showNames ? '' : 'font-mono'}`}>{displayAddr(edge.from)}</span>
+                        <span className="mx-1 text-gray-400">→</span>
+                        <span className={`text-gray-500 ${showNames ? '' : 'font-mono'}`}>{displayAddr(edge.to)}</span>
+                        <span className="ml-2 text-gray-400">token:</span>
+                        <span className="ml-1 text-gray-500 font-mono">{shortAddr(edge.tokenOwner)}</span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-500">{formatValue(edge.flow)}</td>
+                      <td className="px-4 py-2 text-gray-400">{calculateFraction(edge.flow)}</td>
+                    </tr>
+                  );
+                })}
+              </React.Fragment>
             );
           })}
         </tbody>

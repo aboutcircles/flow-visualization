@@ -1,9 +1,10 @@
-/* eslint-disable react/prop-types, no-unused-vars */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFormData } from '@/hooks/useFormData';
 import { usePathData } from '@/hooks/usePathData';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { decomposeFlow, transfersFromRoutes } from '@/utils/flowDecomposition';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
@@ -13,16 +14,18 @@ import FlowMatrixParams from '@/components/FlowMatrixParams';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, GripHorizontal } from 'lucide-react';
+import { AlertTriangle, GripHorizontal, User, Hash } from 'lucide-react';
 import PathStats from '@/components/PathStats';
 
 const FlowVisualization = () => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = usePersistedState('panel-collapsed', false);
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
-  const [activeTab, setActiveTab] = useState('transactions');
+  const [activeTab, setActiveTab] = usePersistedState('active-tab', 'transactions');
   const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
-  const [tableHeight, setTableHeight] = useState(320); // Default height in pixels
-  const [visualizationMode, setVisualizationMode] = useState('graph'); // 'graph' or 'sankey'
+  const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
+  const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
+  const [showNames, setShowNames] = usePersistedState('show-names', true);
+  // selectedTransfers removed — route-based selection via selectedRouteIds
   const cytoscapeRef = useRef(null);
   const sankeyRef = useRef(null);
   const autoSimplifiedRef = useRef(false);
@@ -43,6 +46,11 @@ const FlowVisualization = () => {
   
   const {
     pathData,
+    rawPathData,
+    processedPathData,
+    showProcessed,
+    setShowProcessed,
+    processingMeta,
     loadPathData,
     isLoading,
     error,
@@ -56,7 +64,9 @@ const FlowVisualization = () => {
     maxCapacity,
     setMaxCapacity,
     boundMin,
-    boundMax
+    setBoundMin,
+    boundMax,
+    setBoundMax
   } = usePathData();
   
   // Helper function to get Cytoscape instance
@@ -202,18 +212,132 @@ const FlowVisualization = () => {
     }
   }, [pathData, config.thresholds.veryLargeGraphEdgeCount, config.rendering.fastMode, shouldAutoSimplify, setPreset, visualizationMode]);
   
-  const handleFindPath = useCallback(async () => {
+  const handleFindPath = useCallback(async (overrideFormData) => {
     autoSimplifiedRef.current = false;
-    setSelectedTransactionId(null); // Clear selected transaction
-    clearHighlights(); // Clear any existing highlights
-    
-    await loadPathData(formData);
+    setSelectedTransactionId(null);
+    clearHighlights();
+
+    await loadPathData(overrideFormData || formData);
   }, [formData, loadPathData, clearHighlights]);
-  
+
   const handleTransactionSelect = useCallback((transactionId) => {
     setSelectedTransactionId(transactionId);
     setActiveTab('transactions');
   }, []);
+
+  // --- Route-based flow decomposition ---
+  const [routes, setRoutes] = useState([]);
+  const [selectedRouteIds, setSelectedRouteIds] = useState(new Set());
+
+  // Decompose into routes when pathData changes
+  useEffect(() => {
+    if (!pathData || !formData.From || !formData.To) {
+      setRoutes([]);
+      setSelectedRouteIds(new Set());
+      return;
+    }
+    const source = formData.From.toLowerCase();
+    const sink = formData.To.toLowerCase();
+    const decomposed = decomposeFlow(pathData.transfers, source, sink);
+    setRoutes(decomposed);
+    setSelectedRouteIds(new Set(decomposed.map(r => r.id)));
+  }, [pathData, formData.From, formData.To]);
+
+  // Skip next slider effect after manual toggle (prevents overwrite)
+  const skipSliderEffectRef = useRef(false);
+
+  // Slider filters routes by flow threshold
+  useEffect(() => {
+    if (routes.length === 0) return;
+    if (skipSliderEffectRef.current) {
+      skipSliderEffectRef.current = false;
+      return;
+    }
+    setSelectedRouteIds(
+      new Set(
+        routes
+          .filter(r => r.flowNum >= minCapacity && r.flowNum <= maxCapacity)
+          .map(r => r.id)
+      )
+    );
+  }, [routes, minCapacity, maxCapacity]);
+
+  // Update slider bounds when routes change
+  useEffect(() => {
+    if (routes.length === 0) return;
+    const flows = routes.map(r => r.flowNum);
+    const min = Math.min(...flows);
+    const max = Math.max(...flows);
+    setBoundMin(min);
+    setBoundMax(max);
+    setMinCapacity(min);
+    setMaxCapacity(max);
+  }, [routes]);
+
+  const resetSliderToFull = useCallback(() => {
+    skipSliderEffectRef.current = true;
+    setMinCapacity(boundMin);
+    setMaxCapacity(boundMax);
+  }, [boundMin, boundMax, setMinCapacity, setMaxCapacity]);
+
+  const handleToggleRoute = useCallback((routeId) => {
+    resetSliderToFull();
+    setSelectedRouteIds(prev => {
+      const next = new Set(prev);
+      if (next.has(routeId)) next.delete(routeId);
+      else next.add(routeId);
+      return next;
+    });
+  }, [resetSliderToFull]);
+
+  const handleToggleAllRoutes = useCallback(() => {
+    resetSliderToFull();
+    setSelectedRouteIds(prev => {
+      if (prev.size === routes.length) return new Set();
+      return new Set(routes.map(r => r.id));
+    });
+  }, [routes, resetSliderToFull]);
+
+  // Click node in graph → remove all routes passing through that node
+  const handleNodeRemove = useCallback((nodeId) => {
+    const id = nodeId.toLowerCase();
+    const source = formData.From.toLowerCase();
+    const sink = formData.To.toLowerCase();
+    if (id === source || id === sink) return;
+
+    resetSliderToFull();
+    setSelectedRouteIds(prev => {
+      const next = new Set(prev);
+      for (const route of routes) {
+        if (!next.has(route.id)) continue;
+        const passesThrough = route.edges.some(
+          e => e.from === id || e.to === id
+        );
+        if (passesThrough) next.delete(route.id);
+      }
+      return next;
+    });
+  }, [routes, formData, resetSliderToFull]);
+
+  // Build filtered path data from selected routes
+  const filteredPathData = useMemo(() => {
+    if (!pathData || routes.length === 0) return null;
+    if (selectedRouteIds.size === routes.length) return null; // all selected
+    if (selectedRouteIds.size === 0) return { ...pathData, transfers: [], maxFlow: '0' };
+    return {
+      ...pathData,
+      ...transfersFromRoutes(routes, selectedRouteIds, pathData.transfers),
+    };
+  }, [pathData, routes, selectedRouteIds]);
+
+  // Route selection info for left panel
+  const routeSelectionInfo = pathData && selectedRouteIds.size < routes.length ? {
+    count: selectedRouteIds.size,
+    total: routes.length,
+    flow: routes
+      .filter(r => selectedRouteIds.has(r.id))
+      .reduce((s, r) => s + r.flowNum, 0),
+  } : null;
 
   // Handle resize
   const handleMouseDown = useCallback((e) => {
@@ -283,12 +407,17 @@ const FlowVisualization = () => {
             isLoading={isLoading}
             error={error}
             pathData={pathData}
+            showProcessed={showProcessed}
+            setShowProcessed={setShowProcessed}
+            processedPathData={processedPathData}
+            processingMeta={processingMeta}
             minCapacity={minCapacity}
             setMinCapacity={setMinCapacity}
             maxCapacity={maxCapacity}
             setMaxCapacity={setMaxCapacity}
             boundMin={boundMin}
             boundMax={boundMax}
+            routeSelectionInfo={routeSelectionInfo}
           />
 
           {/* Right content area */}
@@ -357,7 +486,7 @@ const FlowVisualization = () => {
                 visualizationMode === 'graph' ? (
                   <CytoscapeVisualization
                     ref={cytoscapeRef}
-                    pathData={pathData}
+                    pathData={filteredPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
                     nodeProfiles={nodeProfiles}
@@ -366,13 +495,15 @@ const FlowVisualization = () => {
                     minCapacity={minCapacity}
                     maxCapacity={maxCapacity}
                     onTransactionSelect={handleTransactionSelect}
+                    onNodeRemove={handleNodeRemove}
                     selectedTransactionId={selectedTransactionId}
                     onVisualizationModeChange={setVisualizationMode}
+                    showNames={showNames}
                   />
                 ) : (
                   <SankeyVisualization
-                    ref={sankeyRef}  
-                    pathData={pathData}
+                    ref={sankeyRef}
+                    pathData={filteredPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
                     nodeProfiles={nodeProfiles}
@@ -382,6 +513,7 @@ const FlowVisualization = () => {
                     maxCapacity={maxCapacity}
                     onTransactionSelect={handleTransactionSelect}
                     selectedTransactionId={selectedTransactionId}
+                    showNames={showNames}
                   />
                 )
               ) : (
@@ -413,52 +545,90 @@ const FlowVisualization = () => {
                 style={{ height: `${tableHeight}px` }}
               >
                 <Tabs className="flex flex-col h-full">
-                  <div className="px-4 pt-4">
-                    <TabsList>
-                      <TabsTrigger 
-                        isActive={activeTab === 'transactions'} 
+                  <div className="px-4 pt-4 flex items-center justify-between gap-4">
+                    <TabsList className="mb-0">
+                      <TabsTrigger
+                        isActive={activeTab === 'transactions'}
                         onClick={() => setActiveTab('transactions')}
                       >
-                        Transactions ({pathData.transfers?.length || 0})
+                        Routes ({routes.length})
                       </TabsTrigger>
-                      <TabsTrigger 
-                        isActive={activeTab === 'parameters'} 
+                      <TabsTrigger
+                        isActive={activeTab === 'parameters'}
                         onClick={() => setActiveTab('parameters')}
                       >
                         Flow Matrix Parameters
                       </TabsTrigger>
-                      <TabsTrigger 
-                        isActive={activeTab === 'stats'} 
+                      <TabsTrigger
+                        isActive={activeTab === 'stats'}
                         onClick={() => setActiveTab('stats')}
                       >
                         Path Stats
                       </TabsTrigger>
                     </TabsList>
+                    <div className="flex rounded-md shadow-sm text-xs">
+                      <button
+                        onClick={() => setShowNames(true)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-l-md border transition-colors ${
+                          showNames
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <User size={12} />
+                        <span>Names</span>
+                      </button>
+                      <button
+                        onClick={() => setShowNames(false)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-r-md border-t border-r border-b transition-colors ${
+                          !showNames
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Hash size={12} />
+                        <span>Addr</span>
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="flex-1 overflow-auto px-4 pb-4">
-                    <TabsContent isActive={activeTab === 'transactions'} className="h-full">
+                    <TabsContent isActive={activeTab === 'transactions'} className="h-full overflow-hidden">
                       <TransactionTable
-                        transfers={pathData.transfers}
+                        routes={routes}
+                        selectedRouteIds={selectedRouteIds}
+                        onToggleRoute={handleToggleRoute}
+                        onToggleAllRoutes={handleToggleAllRoutes}
                         maxFlow={pathData.maxFlow}
                         onTransactionSelect={handleTransactionSelect}
                         selectedTransactionId={selectedTransactionId}
+                        nodeProfiles={nodeProfiles}
+                        showNames={showNames}
                       />
                     </TabsContent>
                     
                     <TabsContent isActive={activeTab === 'parameters'} className="h-full">
                       <FlowMatrixParams
-                        pathData={pathData}
+                        pathData={filteredPathData || pathData}
                         sender={formData.From}
+                        receiver={formData.To}
+                        showProcessed={showProcessed}
+                        isFiltered={!!filteredPathData}
                       />
                     </TabsContent>
                     
                     <TabsContent isActive={activeTab === 'stats'} className="h-full">
                       <PathStats
-                        pathData={pathData}
+                        pathData={filteredPathData || pathData}
                         tokenOwnerProfiles={tokenOwnerProfiles}
                         nodeProfiles={nodeProfiles}
                         tokenInfo={tokenInfo}
+                        routes={routes}
+                        selectedRouteIds={selectedRouteIds}
+                        onToggleRoute={handleToggleRoute}
+                        onToggleAllRoutes={handleToggleAllRoutes}
+                        maxFlow={pathData.maxFlow}
+                        showNames={showNames}
                       />
                     </TabsContent>
                   </div>
