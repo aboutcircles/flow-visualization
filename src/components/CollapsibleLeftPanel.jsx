@@ -136,7 +136,7 @@ const CollapsibleLeftPanel = ({
             <div className="p-4 pt-0">
               <Card className="p-4">
                 <div className="flex items-center justify-between mb-1">
-                  <p className="text-sm font-medium">SDK View</p>
+                  <p className="text-sm font-medium">Unwrap Tokens</p>
                   <button
                     onClick={() => setShowProcessed(!showProcessed)}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -149,7 +149,7 @@ const CollapsibleLeftPanel = ({
                   </button>
                 </div>
                 <p className="text-xs text-gray-500">
-                  {showProcessed ? 'Showing processed path (unwrapped tokens)' : 'Showing raw pathfinder result'}
+                  {showProcessed ? 'Showing avatar addresses (as executed on-chain)' : 'Showing raw pathfinder result (wrapper addresses)'}
                 </p>
                 {processingMeta?.hasWrappedTokens && (
                   <p className="text-xs text-amber-600 mt-1">
