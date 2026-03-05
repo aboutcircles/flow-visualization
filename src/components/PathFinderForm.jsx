@@ -25,7 +25,8 @@ const PathFinderForm = ({
   maxCapacity,
   setMaxCapacity,
   boundMin,
-  boundMax
+  boundMax,
+  cherryPickInfo
 }) => {
   return (
     <Card>
@@ -120,7 +121,14 @@ const PathFinderForm = ({
           <div className="mb-4">
             <label className="block text-sm font-medium mb-1">
               Capacity range: {minCapacity.toFixed(3)} → {maxCapacity.toFixed(3)}
+              <InfoTip text="Filter visible edges by their individual transfer value (CRC). The range is the min/max single-transfer value in the full path result. Drag the slider to hide small or large transfers from the visualization." />
             </label>
+            {cherryPickInfo && (
+              <p className="text-xs text-indigo-600 mb-1">
+                Selected: {cherryPickInfo.count}/{cherryPickInfo.total} transfers — {cherryPickInfo.sum.toFixed(3)} CRC total
+                <InfoTip text="Cherry-pick sum: the total CRC across all checked transfers in the table. This is NOT the same as capacity range — capacity range filters by individual transfer size, while this sum is the aggregate of your selection. Use checkboxes in the Transactions tab to select specific transfers for custom calldata." />
+              </p>
+            )}
             <SliderPrimitive.Root
               className="relative flex items-center select-none touch-none w-full h-5"
               min={boundMin}

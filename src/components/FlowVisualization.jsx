@@ -339,6 +339,13 @@ const FlowVisualization = () => {
             setMaxCapacity={setMaxCapacity}
             boundMin={boundMin}
             boundMax={boundMax}
+            cherryPickInfo={selectedTransfers.size > 0 && pathData ? {
+              count: selectedTransfers.size,
+              total: pathData.transfers.length,
+              sum: pathData.transfers
+                .filter(t => selectedTransfers.has(getTransactionId(t)))
+                .reduce((s, t) => s + Number(t.value) / 1e18, 0),
+            } : null}
           />
 
           {/* Right content area */}

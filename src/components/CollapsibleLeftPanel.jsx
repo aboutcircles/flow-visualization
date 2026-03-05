@@ -29,7 +29,8 @@ const CollapsibleLeftPanel = ({
   maxCapacity,
   setMaxCapacity,
   boundMin,
-  boundMax
+  boundMax,
+  cherryPickInfo
 }) => {
   const [expandedSections, setExpandedSections] = usePersistedState('expanded-sections', {
     form: true,
@@ -100,6 +101,7 @@ const CollapsibleLeftPanel = ({
                 setMaxCapacity={setMaxCapacity}
                 boundMin={boundMin}
                 boundMax={boundMax}
+                cherryPickInfo={cherryPickInfo}
               />
             )}
           </div>
