@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import PathFinderForm from './PathFinderForm';
 import GraphPerformanceControls from './GraphPerformanceControls';
+import InfoTip from '@/components/ui/info-tip';
 
 const CollapsibleLeftPanel = ({
   isCollapsed,
@@ -136,7 +137,10 @@ const CollapsibleLeftPanel = ({
             <div className="p-4 pt-0">
               <Card className="p-4">
                 <div className="flex items-center justify-between mb-1">
-                  <p className="text-sm font-medium">Unwrap Tokens</p>
+                  <p className="text-sm font-medium">
+                    Unwrap Tokens
+                    <InfoTip text="The pathfinder may route through ERC20-wrapped tokens. This toggle replaces wrapper contract addresses with the underlying avatar addresses — showing the path as it would actually execute on-chain after unwrapping." />
+                  </p>
                   <button
                     onClick={() => setShowProcessed(!showProcessed)}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${

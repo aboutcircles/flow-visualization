@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import TokenInput from '@/components/ui/token-input';
 import ToggleSwitch from '@/components/ui/toggle-switch';
+import InfoTip from '@/components/ui/info-tip';
 import * as SliderPrimitive from '@radix-ui/react-slider';
 
 const PathFinderForm = ({
@@ -30,7 +31,10 @@ const PathFinderForm = ({
     <Card>
       <CardContent className="space-y-4 pt-4">
         <div>
-          <label className="block text-sm font-medium mb-1">From Address</label>
+          <label className="block text-sm font-medium mb-1">
+            From Address
+            <InfoTip text="The sender's avatar address. The pathfinder finds token flows from this address to the recipient." />
+          </label>
           <Input
             name="from"
             value={formData.From}
@@ -39,7 +43,10 @@ const PathFinderForm = ({
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">To Address</label>
+          <label className="block text-sm font-medium mb-1">
+            To Address
+            <InfoTip text="The recipient's avatar address. Must trust (directly or transitively) the tokens being sent." />
+          </label>
           <Input
             name="to"
             value={formData.To}
@@ -48,12 +55,15 @@ const PathFinderForm = ({
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Value (in CRC)</label>
+          <label className="block text-sm font-medium mb-1">
+            Value (in CRC)
+            <InfoTip text="Amount to transfer in CRC (not wei). The pathfinder will find the cheapest route for this amount, or return the max possible flow if insufficient." />
+          </label>
           <Input
             name="crcAmount"
             value={formData.crcAmount}
             onChange={handleInputChange}
-            placeholder="Enter amount in ETH..."
+            placeholder="Enter amount in CRC..."
             type="text"
             inputMode="decimal"
           />
@@ -67,6 +77,7 @@ const PathFinderForm = ({
           label="From Tokens (Add multiple)"
           isExcluded={formData.IsFromTokensExcluded}
           onExclusionToggle={handleFromTokensExclusionToggle}
+          infoTip="Restrict which tokens the sender can use. Toggle 'Exclude' to instead block specific tokens."
         />
 
         <TokenInput
@@ -76,14 +87,16 @@ const PathFinderForm = ({
           label="To Tokens (Add multiple)"
           isExcluded={formData.IsToTokensExcluded}
           onExclusionToggle={handleToTokensExclusionToggle}
+          infoTip="Restrict which tokens the recipient accepts. Toggle 'Exclude' to instead block specific tokens."
         />
 
-        <div>
+        <div className="flex items-center">
           <ToggleSwitch
             isEnabled={formData.WithWrap}
             onToggle={handleWithWrapToggle}
             label="Include Wrapped Tokens"
           />
+          <InfoTip text="Allow the pathfinder to use ERC20-wrapped Circles tokens. Wrapped tokens have broader trust acceptance but require unwrap/wrap operations before the on-chain transfer." />
         </div>
         <div>
           <ToggleSwitch

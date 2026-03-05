@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Plus, X } from 'lucide-react';
 import { parseAddressList } from '@/services/circlesApi';
 import ToggleSwitch from '@/components/ui/toggle-switch';
+import InfoTip from '@/components/ui/info-tip';
 
 // TokenInput component for handling multiple token inputs
-const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusionToggle }) => {
+const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusionToggle, infoTip }) => {
   const [inputValue, setInputValue] = useState('');
 
   // Parse the current value string into an array of tokens
@@ -36,7 +37,10 @@ const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusi
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="block text-sm font-medium">{label}</label>
+        <label className="block text-sm font-medium">
+          {label}
+          {infoTip && <InfoTip text={infoTip} />}
+        </label>
         <ToggleSwitch
           isEnabled={isExcluded}
           onToggle={onExclusionToggle}
