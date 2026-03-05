@@ -23,19 +23,26 @@ const TokenInput = forwardRef(({ value, onChange, placeholder, label, isExcluded
 
   const handleAddToken = () => {
     const trimmed = inputValue.trim().toLowerCase();
-    if (!trimmed || !trimmed.startsWith('0x')) return false;
+    if (!trimmed || !trimmed.startsWith('0x')) return null;
     if (tokens.some(t => t.toLowerCase() === trimmed)) {
       setInputValue('');
-      return false;
+      return null;
     }
     const updatedTokens = [...tokens, inputValue.trim()];
-    onChange(updatedTokens.join(','));
+    const newValue = updatedTokens.join(',');
+    onChange(newValue);
     setInputValue('');
-    return true;
+    return newValue;
   };
 
-  // Expose flushPending so parent can auto-add before Find Path
+  // Expose getPending (returns typed text) and flushPending (adds it, returns new list)
   useImperativeHandle(ref, () => ({
+    getPending: () => {
+      const trimmed = inputValue.trim().toLowerCase();
+      if (!trimmed || !trimmed.startsWith('0x')) return null;
+      if (tokens.some(t => t.toLowerCase() === trimmed)) return null;
+      return trimmed;
+    },
     flushPending: handleAddToken,
   }));
 
@@ -61,7 +68,7 @@ const TokenInput = forwardRef(({ value, onChange, placeholder, label, isExcluded
         <ToggleSwitch
           isEnabled={isExcluded}
           onToggle={onExclusionToggle}
-          label={isExcluded ? "Is Excluding" : "Is Including"}
+          label={isExcluded ? "Exclude mode" : "Include mode"}
         />
       </div>
       <div className="flex mb-2">

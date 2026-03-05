@@ -209,12 +209,12 @@ const FlowVisualization = () => {
     }
   }, [pathData, config.thresholds.veryLargeGraphEdgeCount, config.rendering.fastMode, shouldAutoSimplify, setPreset, visualizationMode]);
   
-  const handleFindPath = useCallback(async () => {
+  const handleFindPath = useCallback(async (overrideFormData) => {
     autoSimplifiedRef.current = false;
     setSelectedTransactionId(null);
     clearHighlights();
 
-    await loadPathData(formData);
+    await loadPathData(overrideFormData || formData);
   }, [formData, loadPathData, clearHighlights]);
 
   const handleTransactionSelect = useCallback((transactionId) => {

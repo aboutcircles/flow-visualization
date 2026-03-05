@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import TokenInput from '@/components/ui/token-input';
 import ToggleSwitch from '@/components/ui/toggle-switch';
 import InfoTip from '@/components/ui/info-tip';
+import { parseAddressList } from '@/services/circlesApi';
 import * as SliderPrimitive from '@radix-ui/react-slider';
 
 const PathFinderForm = ({
@@ -30,9 +31,27 @@ const PathFinderForm = ({
   const toTokensRef = useRef(null);
 
   const handleFindPath = () => {
-    fromTokensRef.current?.flushPending();
-    toTokensRef.current?.flushPending();
-    onFindPath();
+    // Auto-add any typed-but-not-submitted tokens, then pass patched formData
+    // to avoid stale closure issues with onFindPath
+    let patched = { ...formData };
+
+    const fromPending = fromTokensRef.current?.getPending?.();
+    if (fromPending) {
+      fromTokensRef.current.flushPending(); // visual update
+      const field = formData.IsFromTokensExcluded ? 'ExcludedFromTokens' : 'FromTokens';
+      const current = parseAddressList(patched[field]);
+      patched[field] = [...current, fromPending].join(',');
+    }
+
+    const toPending = toTokensRef.current?.getPending?.();
+    if (toPending) {
+      toTokensRef.current.flushPending(); // visual update
+      const field = formData.IsToTokensExcluded ? 'ExcludedToTokens' : 'ToTokens';
+      const current = parseAddressList(patched[field]);
+      patched[field] = [...current, toPending].join(',');
+    }
+
+    onFindPath(fromPending || toPending ? patched : undefined);
   };
 
   return (
