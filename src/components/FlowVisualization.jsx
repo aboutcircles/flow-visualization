@@ -543,15 +543,6 @@ const FlowVisualization = () => {
                         onClick={() => setActiveTab('transactions')}
                       >
                         Transactions ({pathData.transfers?.length || 0})
-                        {selectedTransfers.size < pathData.transfers.length && (
-                          <span className="ml-1 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">
-                            {selectedTransfers.size} selected — {(
-                              pathData.transfers
-                                .filter(t => selectedTransfers.has(getTransactionId(t)))
-                                .reduce((sum, t) => sum + Number(t.value) / 1e18, 0)
-                            ).toFixed(2)} CRC
-                          </span>
-                        )}
                       </TabsTrigger>
                       <TabsTrigger 
                         isActive={activeTab === 'parameters'} 
