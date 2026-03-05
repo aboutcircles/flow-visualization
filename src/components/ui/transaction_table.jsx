@@ -3,8 +3,8 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTransactionId, selectedTransfers, onToggleTransfer, onToggleAll }) => {
   const [sortConfig, setSortConfig] = useState({
-    key: null,
-    direction: 'ascending'
+    key: 'value',
+    direction: 'descending'
   });
 
   // Format value to show in scientific notation if very small

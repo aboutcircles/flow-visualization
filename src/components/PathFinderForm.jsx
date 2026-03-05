@@ -1,6 +1,4 @@
-/* eslint-disable react/prop-types, no-unused-vars */
-import React from 'react';
-import PropTypes from 'prop-types';
+import React, { useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -28,6 +26,15 @@ const PathFinderForm = ({
   boundMax,
   cherryPickInfo
 }) => {
+  const fromTokensRef = useRef(null);
+  const toTokensRef = useRef(null);
+
+  const handleFindPath = () => {
+    fromTokensRef.current?.flushPending();
+    toTokensRef.current?.flushPending();
+    onFindPath();
+  };
+
   return (
     <Card>
       <CardContent className="space-y-4 pt-4">
@@ -72,6 +79,7 @@ const PathFinderForm = ({
 
         {/* Token input components for multiple tokens */}
         <TokenInput
+          ref={fromTokensRef}
           value={formData.IsFromTokensExcluded ? formData.ExcludedFromTokens : formData.FromTokens}
           onChange={(value) => handleTokensChange('FromTokens', value)}
           placeholder="0x..."
@@ -82,6 +90,7 @@ const PathFinderForm = ({
         />
 
         <TokenInput
+          ref={toTokensRef}
           value={formData.IsToTokensExcluded ? formData.ExcludedToTokens : formData.ToTokens}
           onChange={(value) => handleTokensChange('ToTokens', value)}
           placeholder="0x..."
@@ -156,7 +165,7 @@ const PathFinderForm = ({
 
         <Button
           className="w-full"
-          onClick={onFindPath}
+          onClick={handleFindPath}
           disabled={isLoading}
         >
           {isLoading ? 'Finding Path...' : 'Find Path'}

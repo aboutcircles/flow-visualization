@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Plus, X } from 'lucide-react';
@@ -6,8 +6,7 @@ import { parseAddressList } from '@/services/circlesApi';
 import ToggleSwitch from '@/components/ui/toggle-switch';
 import InfoTip from '@/components/ui/info-tip';
 
-// TokenInput component for handling multiple token inputs
-const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusionToggle, infoTip }) => {
+const TokenInput = forwardRef(({ value, onChange, placeholder, label, isExcluded, onExclusionToggle, infoTip }, ref) => {
   const [inputValue, setInputValue] = useState('');
   const prevExcluded = useRef(isExcluded);
 
@@ -24,16 +23,21 @@ const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusi
 
   const handleAddToken = () => {
     const trimmed = inputValue.trim().toLowerCase();
-    if (!trimmed || !trimmed.startsWith('0x')) return;
-    // Deduplicate
+    if (!trimmed || !trimmed.startsWith('0x')) return false;
     if (tokens.some(t => t.toLowerCase() === trimmed)) {
       setInputValue('');
-      return;
+      return false;
     }
     const updatedTokens = [...tokens, inputValue.trim()];
     onChange(updatedTokens.join(','));
     setInputValue('');
+    return true;
   };
+
+  // Expose flushPending so parent can auto-add before Find Path
+  useImperativeHandle(ref, () => ({
+    flushPending: handleAddToken,
+  }));
 
   const handleRemoveToken = (tokenToRemove) => {
     const updatedTokens = tokens.filter(token => token !== tokenToRemove);
@@ -96,6 +100,6 @@ const TokenInput = ({ value, onChange, placeholder, label, isExcluded, onExclusi
       )}
     </div>
   );
-};
+});
 
 export default TokenInput;
