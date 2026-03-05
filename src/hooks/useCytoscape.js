@@ -21,7 +21,8 @@ export const useCytoscape = ({
   onTooltip,
   onTransactionSelect,
   onNodeRemove,
-  layoutName = 'klay'
+  layoutName = 'klay',
+  showNames = true
 }) => {
   const cyRef = useRef(null);
   const isInitializingRef = useRef(false);
@@ -160,7 +161,8 @@ export const useCytoscape = ({
       // Add label
       if (config.rendering.features.nodeLabels) {
         const profile = nodeProfiles[id];
-        nodeData.label = profile?.name || `${id.slice(0, 6)}...${id.slice(-4)}`;
+        const shortAddr = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        nodeData.label = (showNames && profile?.name) ? profile.name : shortAddr;
       }
 
       return { data: nodeData };
@@ -606,24 +608,21 @@ export const useCytoscape = ({
     });
   }, [config.rendering.features]);
 
-  // Update node labels when profiles change
+  // Update node labels when profiles or showNames changes
   useEffect(() => {
     if (!config.rendering.features.nodeLabels || !cyRef.current) return;
-    
+
     const cy = cyRef.current;
-    if (Object.keys(nodeProfiles).length === 0) return;
 
     cy.batch(() => {
-      Object.entries(nodeProfiles).forEach(([addr, profile]) => {
-        if (profile?.name) {
-          const node = cy.getElementById(addr);
-          if (!node.empty()) {
-            node.data('label', profile.name);
-          }
-        }
+      cy.nodes().forEach((node) => {
+        const id = node.id();
+        const profile = nodeProfiles[id];
+        const shortAddr = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        node.data('label', (showNames && profile?.name) ? profile.name : shortAddr);
       });
     });
-  }, [nodeProfiles, config.rendering.features.nodeLabels]);
+  }, [nodeProfiles, showNames, config.rendering.features.nodeLabels]);
 
   // Update edge gradients based on capacity
   useEffect(() => {

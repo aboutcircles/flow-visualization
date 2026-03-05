@@ -128,7 +128,7 @@ const PathFinderForm = ({
           />
           <InfoTip text="Allow the pathfinder to use ERC20-wrapped Circles tokens. Wrapped tokens have broader trust acceptance but require unwrap/wrap operations before the on-chain transfer." />
         </div>
-        <div>
+        <div className="flex items-center">
           <ToggleSwitch
             isEnabled={formData.UseStaging}
             onToggle={handleStagingToggle}

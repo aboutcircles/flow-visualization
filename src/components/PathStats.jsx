@@ -1,12 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Card } from '@/components/ui/card';
-import { User, Hash } from 'lucide-react';
 import { calculateAllMetrics } from '@/components/metrics';
 
 const shortAddr = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 
-const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow, nodeProfiles }) => {
-  const [showNames, setShowNames] = useState(true);
+const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow, nodeProfiles, showNames = true }) => {
   const sorted = [...routes].sort((a, b) => b.flowNum - a.flowNum);
   const allSelected = selectedRouteIds.size === routes.length && routes.length > 0;
   const someSelected = selectedRouteIds.size > 0 && selectedRouteIds.size < routes.length;
@@ -29,13 +27,6 @@ const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRou
           </span>
         </h3>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowNames(v => !v)}
-            className="p-1 rounded hover:bg-gray-200 transition-colors"
-            title={showNames ? 'Show addresses' : 'Show names'}
-          >
-            {showNames ? <Hash size={14} className="text-gray-400" /> : <User size={14} className="text-gray-400" />}
-          </button>
           <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
             <input
               type="checkbox"
@@ -86,7 +77,7 @@ const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRou
   );
 };
 
-const PathStats = ({ pathData, tokenInfo, nodeProfiles, routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow }) => {
+const PathStats = ({ pathData, tokenInfo, nodeProfiles, routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow, showNames }) => {
   if (!pathData) {
     return (
       <div className="text-center text-gray-500 py-8">
@@ -121,6 +112,7 @@ const PathStats = ({ pathData, tokenInfo, nodeProfiles, routes, selectedRouteIds
           onToggleAllRoutes={onToggleAllRoutes}
           maxFlow={maxFlow}
           nodeProfiles={nodeProfiles}
+          showNames={showNames}
         />
       )}
 

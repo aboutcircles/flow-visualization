@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, User, Hash } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 const TransactionTable = ({
   routes,
@@ -9,10 +9,10 @@ const TransactionTable = ({
   maxFlow,
   onTransactionSelect,
   selectedTransactionId,
-  nodeProfiles
+  nodeProfiles,
+  showNames = true
 }) => {
   const [expandedRoutes, setExpandedRoutes] = useState(new Set());
-  const [showNames, setShowNames] = useState(true);
 
   const formatValue = (value) => {
     const num = Number(value) / 1e18;
@@ -62,18 +62,7 @@ const TransactionTable = ({
               />
             </th>
             <th className="px-3 py-3 w-8"></th>
-            <th className="px-4 py-3">
-              <div className="flex items-center gap-2">
-                Route
-                <button
-                  onClick={() => setShowNames(v => !v)}
-                  className="p-0.5 rounded hover:bg-gray-200 transition-colors"
-                  title={showNames ? 'Show addresses' : 'Show names'}
-                >
-                  {showNames ? <Hash size={13} className="text-gray-400" /> : <User size={13} className="text-gray-400" />}
-                </button>
-              </div>
-            </th>
+            <th className="px-4 py-3">Route</th>
             <th className="px-4 py-3">Hops</th>
             <th className="px-4 py-3">Flow (CRC)</th>
             <th className="px-4 py-3">% of Max</th>

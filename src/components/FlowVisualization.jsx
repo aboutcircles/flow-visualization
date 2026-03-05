@@ -14,7 +14,7 @@ import FlowMatrixParams from '@/components/FlowMatrixParams';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, GripHorizontal } from 'lucide-react';
+import { AlertTriangle, GripHorizontal, User, Hash } from 'lucide-react';
 import PathStats from '@/components/PathStats';
 
 const FlowVisualization = () => {
@@ -24,6 +24,7 @@ const FlowVisualization = () => {
   const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
   const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
   const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
+  const [showNames, setShowNames] = usePersistedState('show-names', true);
   // selectedTransfers removed — route-based selection via selectedRouteIds
   const cytoscapeRef = useRef(null);
   const sankeyRef = useRef(null);
@@ -497,6 +498,7 @@ const FlowVisualization = () => {
                     onNodeRemove={handleNodeRemove}
                     selectedTransactionId={selectedTransactionId}
                     onVisualizationModeChange={setVisualizationMode}
+                    showNames={showNames}
                   />
                 ) : (
                   <SankeyVisualization
@@ -511,6 +513,7 @@ const FlowVisualization = () => {
                     maxCapacity={maxCapacity}
                     onTransactionSelect={handleTransactionSelect}
                     selectedTransactionId={selectedTransactionId}
+                    showNames={showNames}
                   />
                 )
               ) : (
@@ -542,27 +545,51 @@ const FlowVisualization = () => {
                 style={{ height: `${tableHeight}px` }}
               >
                 <Tabs className="flex flex-col h-full">
-                  <div className="px-4 pt-4">
-                    <TabsList>
+                  <div className="px-4 pt-4 flex items-center justify-between gap-4">
+                    <TabsList className="mb-0">
                       <TabsTrigger
                         isActive={activeTab === 'transactions'}
                         onClick={() => setActiveTab('transactions')}
                       >
                         Routes ({routes.length})
                       </TabsTrigger>
-                      <TabsTrigger 
-                        isActive={activeTab === 'parameters'} 
+                      <TabsTrigger
+                        isActive={activeTab === 'parameters'}
                         onClick={() => setActiveTab('parameters')}
                       >
                         Flow Matrix Parameters
                       </TabsTrigger>
-                      <TabsTrigger 
-                        isActive={activeTab === 'stats'} 
+                      <TabsTrigger
+                        isActive={activeTab === 'stats'}
                         onClick={() => setActiveTab('stats')}
                       >
                         Path Stats
                       </TabsTrigger>
                     </TabsList>
+                    <div className="flex rounded-md shadow-sm text-xs">
+                      <button
+                        onClick={() => setShowNames(true)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-l-md border transition-colors ${
+                          showNames
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <User size={12} />
+                        <span>Names</span>
+                      </button>
+                      <button
+                        onClick={() => setShowNames(false)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-r-md border-t border-r border-b transition-colors ${
+                          !showNames
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Hash size={12} />
+                        <span>Addr</span>
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="flex-1 overflow-auto px-4 pb-4">
@@ -576,6 +603,7 @@ const FlowVisualization = () => {
                         onTransactionSelect={handleTransactionSelect}
                         selectedTransactionId={selectedTransactionId}
                         nodeProfiles={nodeProfiles}
+                        showNames={showNames}
                       />
                     </TabsContent>
                     
@@ -600,6 +628,7 @@ const FlowVisualization = () => {
                         onToggleRoute={handleToggleRoute}
                         onToggleAllRoutes={handleToggleAllRoutes}
                         maxFlow={pathData.maxFlow}
+                        showNames={showNames}
                       />
                     </TabsContent>
                   </div>

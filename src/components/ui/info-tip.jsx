@@ -9,8 +9,8 @@ const InfoTip = ({ text, size = 14 }) => {
   const show = useCallback(() => {
     if (buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      // Show above if too close to bottom, below otherwise
-      setPosition(rect.bottom + 120 > window.innerHeight ? 'above' : 'below');
+      // Show below only if too close to top of viewport, above otherwise
+      setPosition(rect.top < 120 ? 'below' : 'above');
     }
     setVisible(true);
   }, []);

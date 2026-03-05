@@ -24,7 +24,8 @@ const CytoscapeVisualization = forwardRef(({
   onTransactionSelect,
   onNodeRemove,
   selectedTransactionId,
-  onVisualizationModeChange
+  onVisualizationModeChange,
+  showNames = true
 }, ref) => {
   const containerRef = useRef(null);
   const [tooltip, setTooltip] = useState({ text: '', position: null });
@@ -54,7 +55,8 @@ const CytoscapeVisualization = forwardRef(({
     onTooltip: setTooltip,
     onTransactionSelect,
     onNodeRemove,
-    layoutName
+    layoutName,
+    showNames
   });
 
   // Enhanced highlightPath that also updates local state
