@@ -138,8 +138,8 @@ const CollapsibleLeftPanel = ({
               <Card className="p-4">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-sm font-medium">
-                    Unwrap Tokens
-                    <InfoTip text="The pathfinder may route through ERC20-wrapped tokens. This toggle replaces wrapper contract addresses with the underlying avatar addresses — showing the path as it would actually execute on-chain after unwrapping." />
+                    Resolve Wrappers
+                    <InfoTip text="Display option only — does not change the path. When ON, wrapper contract addresses in the graph are replaced with the underlying avatar addresses, showing the path as it would execute on-chain." />
                   </p>
                   <button
                     onClick={() => setShowProcessed(!showProcessed)}
@@ -153,7 +153,7 @@ const CollapsibleLeftPanel = ({
                   </button>
                 </div>
                 <p className="text-xs text-gray-500">
-                  {showProcessed ? 'Showing avatar addresses (as executed on-chain)' : 'Showing raw pathfinder result (wrapper addresses)'}
+                  {showProcessed ? 'Wrapper addresses → avatar addresses' : 'Raw pathfinder output'}
                 </p>
                 {processingMeta?.hasWrappedTokens && (
                   <p className="text-xs text-amber-600 mt-1">
