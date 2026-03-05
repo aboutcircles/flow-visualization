@@ -76,7 +76,7 @@ function bytesToHex(bytes) {
   return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isCherryPicked }) => {
+const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltered }) => {
   const [flowMatrix, setFlowMatrix] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
@@ -289,7 +289,7 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isCherryP
             <span>Raw path — may contain wrapper addresses. Enable &quot;Resolve Wrappers&quot; for executable calldata.</span>
           </div>
         )}
-        {isCherryPicked && (
+        {isFiltered && (
           <div className="flex items-center gap-2 mb-3 p-2 bg-indigo-50 border border-indigo-200 rounded text-indigo-800 text-xs">
             <span>Cherry-picked: {pathData.transfers.length} transfer{pathData.transfers.length !== 1 ? 's' : ''} selected. Subset may not form a valid flow matrix.</span>
           </div>

@@ -212,7 +212,6 @@ const FlowVisualization = () => {
   const handleFindPath = useCallback(async () => {
     autoSimplifiedRef.current = false;
     setSelectedTransactionId(null);
-    setSelectedTransfers(new Set());
     clearHighlights();
 
     await loadPathData(formData);
@@ -225,6 +224,27 @@ const FlowVisualization = () => {
 
   // Cherry-pick transfer handlers
   const getTransactionId = (t) => `${t.from}-${t.to}-${t.tokenOwner}`;
+
+  // Select ALL transfers when new path data arrives
+  useEffect(() => {
+    if (!pathData) return;
+    setSelectedTransfers(new Set(pathData.transfers.map(getTransactionId)));
+  }, [pathData]);
+
+  // Slider changes auto-update selection (filter by capacity range)
+  useEffect(() => {
+    if (!pathData) return;
+    setSelectedTransfers(
+      new Set(
+        pathData.transfers
+          .filter(t => {
+            const v = Number(t.value) / 1e18;
+            return v >= minCapacity && v <= maxCapacity;
+          })
+          .map(getTransactionId)
+      )
+    );
+  }, [pathData, minCapacity, maxCapacity]);
 
   const handleToggleTransfer = useCallback((transactionId) => {
     setSelectedTransfers(prev => {
@@ -243,13 +263,12 @@ const FlowVisualization = () => {
     });
   }, [pathData]);
 
-  // Build cherry-picked path data for flow matrix
-  // maxFlow = sum of selected transfer values (createFlowMatrix validates this internally)
-  const cherryPickedPathData = selectedTransfers.size > 0 && pathData
+  // Build filtered path data from selection
+  const filteredPathData = pathData
     ? (() => {
         const selected = pathData.transfers.filter(t => selectedTransfers.has(getTransactionId(t)));
+        if (selected.length === pathData.transfers.length) return null; // all selected = use original
         const receiver = formData.To.toLowerCase();
-        // Sum only transfers that end at the receiver (terminal transfers)
         const terminalSum = selected
           .filter(t => t.to.toLowerCase() === receiver)
           .reduce((sum, t) => sum + BigInt(t.value), 0n);
@@ -339,7 +358,7 @@ const FlowVisualization = () => {
             setMaxCapacity={setMaxCapacity}
             boundMin={boundMin}
             boundMax={boundMax}
-            cherryPickInfo={selectedTransfers.size > 0 && pathData ? {
+            cherryPickInfo={pathData && selectedTransfers.size < pathData.transfers.length ? {
               count: selectedTransfers.size,
               total: pathData.transfers.length,
               sum: pathData.transfers
@@ -414,7 +433,7 @@ const FlowVisualization = () => {
                 visualizationMode === 'graph' ? (
                   <CytoscapeVisualization
                     ref={cytoscapeRef}
-                    pathData={cherryPickedPathData || pathData}
+                    pathData={filteredPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
                     nodeProfiles={nodeProfiles}
@@ -429,7 +448,7 @@ const FlowVisualization = () => {
                 ) : (
                   <SankeyVisualization
                     ref={sankeyRef}
-                    pathData={cherryPickedPathData || pathData}
+                    pathData={filteredPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
                     nodeProfiles={nodeProfiles}
@@ -477,7 +496,7 @@ const FlowVisualization = () => {
                         onClick={() => setActiveTab('transactions')}
                       >
                         Transactions ({pathData.transfers?.length || 0})
-                        {selectedTransfers.size > 0 && (
+                        {selectedTransfers.size < pathData.transfers.length && (
                           <span className="ml-1 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">
                             {selectedTransfers.size} selected — {(
                               pathData.transfers
@@ -517,17 +536,17 @@ const FlowVisualization = () => {
                     
                     <TabsContent isActive={activeTab === 'parameters'} className="h-full">
                       <FlowMatrixParams
-                        pathData={cherryPickedPathData || pathData}
+                        pathData={filteredPathData || pathData}
                         sender={formData.From}
                         receiver={formData.To}
                         showProcessed={showProcessed}
-                        isCherryPicked={!!cherryPickedPathData}
+                        isFiltered={!!filteredPathData}
                       />
                     </TabsContent>
                     
                     <TabsContent isActive={activeTab === 'stats'} className="h-full">
                       <PathStats
-                        pathData={cherryPickedPathData || pathData}
+                        pathData={filteredPathData || pathData}
                         tokenOwnerProfiles={tokenOwnerProfiles}
                         nodeProfiles={nodeProfiles}
                         tokenInfo={tokenInfo}

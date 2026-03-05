@@ -664,22 +664,8 @@ export const useCytoscape = ({
     });
   }, [balancesByAccount, config.rendering.features]);
 
-  // Edge filtering
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-
-    cy.batch(() => {
-      cy.edges().forEach(edge => {
-        const v = edge.data('flowValue');
-        if (v < minCapacity || v > maxCapacity) {
-          edge.hide();
-        } else {
-          edge.show();
-        }
-      });
-    });
-  }, [minCapacity, maxCapacity]);
+  // Edge filtering removed — slider now drives transfer selection upstream,
+  // which changes the pathData prop, causing graph re-render with filtered data.
 
   // Highlight transaction
   const highlightTransaction = useCallback((transactionId) => {

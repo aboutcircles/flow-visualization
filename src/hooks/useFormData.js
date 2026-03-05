@@ -8,8 +8,16 @@ function loadSavedForm() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Merge with defaults so new/missing fields get proper defaults
-      return { ...DEFAULTS, ...parsed };
+      const merged = { ...DEFAULTS, ...parsed };
+      console.log('[form-persist] loaded:', {
+        FromTokens: merged.FromTokens,
+        ToTokens: merged.ToTokens,
+        ExcludedFromTokens: merged.ExcludedFromTokens,
+        ExcludedToTokens: merged.ExcludedToTokens,
+        IsFromTokensExcluded: merged.IsFromTokensExcluded,
+        IsToTokensExcluded: merged.IsToTokensExcluded,
+      });
+      return merged;
     }
   } catch {}
   return null;
