@@ -11,6 +11,8 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@aboutcircles/sdk-abis": "^0.1.24",
+    "@aboutcircles/sdk-core": "^0.1.24",
     "@aboutcircles/sdk-pathfinder": "^0.1.24",
     "@aboutcircles/sdk-rpc": "^0.1.24",
     "@aboutcircles/sdk-types": "^0.1.24",
