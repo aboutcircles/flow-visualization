@@ -559,7 +559,7 @@ const FlowVisualization = () => {
                     </TabsList>
                   </div>
                   
-                  <div className="flex-1 overflow-auto px-4 pb-4">
+                  <div className="flex-1 overflow-hidden px-4 pb-4">
                     <TabsContent isActive={activeTab === 'transactions'} className="h-full">
                       <TransactionTable
                         transfers={pathData.transfers}
