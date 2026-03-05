@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { findPath, processPath, createCirclesClients, fetchTokenInfo, fetchProfiles, fetchTokenBalancesWithInfo } from '../services/circlesApi';
 import { usePerformance } from '@/contexts/PerformanceContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 export const usePathData = () => {
   const { circlesData, circlesProfiles, sdkRpc } = useRef(createCirclesClients()).current;
@@ -10,7 +11,7 @@ export const usePathData = () => {
   const [error, setError] = useState(null);
   const [rawPathData, setRawPathData] = useState(null);
   const [processedPathData, setProcessedPathData] = useState(null);
-  const [showProcessed, setShowProcessed] = useState(false);
+  const [showProcessed, setShowProcessed] = usePersistedState('show-processed', false);
   const [processingMeta, setProcessingMeta] = useState(null);
 
   // Derived: active path depends on toggle

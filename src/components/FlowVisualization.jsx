@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useFormData } from '@/hooks/useFormData';
 import { usePathData } from '@/hooks/usePathData';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import Header from '@/components/ui/header';
@@ -17,12 +18,13 @@ import { AlertTriangle, GripHorizontal } from 'lucide-react';
 import PathStats from '@/components/PathStats';
 
 const FlowVisualization = () => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = usePersistedState('panel-collapsed', false);
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
-  const [activeTab, setActiveTab] = useState('transactions');
+  const [activeTab, setActiveTab] = usePersistedState('active-tab', 'transactions');
   const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
-  const [tableHeight, setTableHeight] = useState(320); // Default height in pixels
-  const [visualizationMode, setVisualizationMode] = useState('graph'); // 'graph' or 'sankey'
+  const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
+  const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
+  const [selectedTransfers, setSelectedTransfers] = useState(new Set());
   const cytoscapeRef = useRef(null);
   const sankeyRef = useRef(null);
   const autoSimplifiedRef = useRef(false);
@@ -209,16 +211,55 @@ const FlowVisualization = () => {
   
   const handleFindPath = useCallback(async () => {
     autoSimplifiedRef.current = false;
-    setSelectedTransactionId(null); // Clear selected transaction
-    clearHighlights(); // Clear any existing highlights
-    
+    setSelectedTransactionId(null);
+    setSelectedTransfers(new Set());
+    clearHighlights();
+
     await loadPathData(formData);
   }, [formData, loadPathData, clearHighlights]);
-  
+
   const handleTransactionSelect = useCallback((transactionId) => {
     setSelectedTransactionId(transactionId);
     setActiveTab('transactions');
   }, []);
+
+  // Cherry-pick transfer handlers
+  const getTransactionId = (t) => `${t.from}-${t.to}-${t.tokenOwner}`;
+
+  const handleToggleTransfer = useCallback((transactionId) => {
+    setSelectedTransfers(prev => {
+      const next = new Set(prev);
+      if (next.has(transactionId)) next.delete(transactionId);
+      else next.add(transactionId);
+      return next;
+    });
+  }, []);
+
+  const handleToggleAll = useCallback(() => {
+    if (!pathData) return;
+    setSelectedTransfers(prev => {
+      if (prev.size === pathData.transfers.length) return new Set();
+      return new Set(pathData.transfers.map(getTransactionId));
+    });
+  }, [pathData]);
+
+  // Build cherry-picked path data for flow matrix
+  // maxFlow = sum of selected transfer values (createFlowMatrix validates this internally)
+  const cherryPickedPathData = selectedTransfers.size > 0 && pathData
+    ? (() => {
+        const selected = pathData.transfers.filter(t => selectedTransfers.has(getTransactionId(t)));
+        const receiver = formData.To.toLowerCase();
+        // Sum only transfers that end at the receiver (terminal transfers)
+        const terminalSum = selected
+          .filter(t => t.to.toLowerCase() === receiver)
+          .reduce((sum, t) => sum + BigInt(t.value), 0n);
+        return {
+          ...pathData,
+          transfers: selected,
+          maxFlow: (terminalSum > 0n ? terminalSum : BigInt(pathData.maxFlow)).toString(),
+        };
+      })()
+    : null;
 
   // Handle resize
   const handleMouseDown = useCallback((e) => {
@@ -429,6 +470,11 @@ const FlowVisualization = () => {
                         onClick={() => setActiveTab('transactions')}
                       >
                         Transactions ({pathData.transfers?.length || 0})
+                        {selectedTransfers.size > 0 && (
+                          <span className="ml-1 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">
+                            {selectedTransfers.size} selected
+                          </span>
+                        )}
                       </TabsTrigger>
                       <TabsTrigger 
                         isActive={activeTab === 'parameters'} 
@@ -452,15 +498,19 @@ const FlowVisualization = () => {
                         maxFlow={pathData.maxFlow}
                         onTransactionSelect={handleTransactionSelect}
                         selectedTransactionId={selectedTransactionId}
+                        selectedTransfers={selectedTransfers}
+                        onToggleTransfer={handleToggleTransfer}
+                        onToggleAll={handleToggleAll}
                       />
                     </TabsContent>
                     
                     <TabsContent isActive={activeTab === 'parameters'} className="h-full">
                       <FlowMatrixParams
-                        pathData={pathData}
+                        pathData={cherryPickedPathData || pathData}
                         sender={formData.From}
                         receiver={formData.To}
                         showProcessed={showProcessed}
+                        isCherryPicked={!!cherryPickedPathData}
                       />
                     </TabsContent>
                     

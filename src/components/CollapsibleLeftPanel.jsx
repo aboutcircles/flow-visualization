@@ -1,11 +1,10 @@
-/* eslint-disable react/prop-types, no-unused-vars */
-/* eslint-disable react/prop-types, no-unused-vars */
-import React, { useState } from 'react';
+import React from 'react';
 import { Card } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import PathFinderForm from './PathFinderForm';
 import GraphPerformanceControls from './GraphPerformanceControls';
 import InfoTip from '@/components/ui/info-tip';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 const CollapsibleLeftPanel = ({
   isCollapsed,
@@ -32,7 +31,7 @@ const CollapsibleLeftPanel = ({
   boundMin,
   boundMax
 }) => {
-  const [expandedSections, setExpandedSections] = useState({
+  const [expandedSections, setExpandedSections] = usePersistedState('expanded-sections', {
     form: true,
     performance: true
   });

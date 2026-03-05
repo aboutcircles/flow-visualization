@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
-const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTransactionId }) => {
+const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTransactionId, selectedTransfers, onToggleTransfer, onToggleAll }) => {
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending'
@@ -71,7 +71,19 @@ const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTra
       <table className="w-full text-sm text-left">
         <thead className="bg-gray-50 text-gray-600">
           <tr>
-            <th 
+            {selectedTransfers && (
+              <th className="px-3 py-3 w-10">
+                <input
+                  type="checkbox"
+                  checked={selectedTransfers.size === transfers.length && transfers.length > 0}
+                  ref={(el) => { if (el) el.indeterminate = selectedTransfers.size > 0 && selectedTransfers.size < transfers.length; }}
+                  onChange={() => onToggleAll()}
+                  className="rounded border-gray-300"
+                  title="Select all / none"
+                />
+              </th>
+            )}
+            <th
               className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
               onClick={() => requestSort('from')}
             >
@@ -117,14 +129,25 @@ const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTra
           {sortedTransfers.map((transfer) => {
             const transactionId = getTransactionId(transfer);
             return (
-              <tr 
+              <tr
                 key={transactionId}
                 className={`
                   hover:bg-gray-50 cursor-pointer
                   ${selectedTransactionId === transactionId ? 'bg-blue-50' : ''}
+                  ${selectedTransfers?.has(transactionId) ? 'bg-indigo-50' : ''}
                 `}
                 onClick={() => onTransactionSelect(transactionId)}
               >
+                {selectedTransfers && (
+                  <td className="px-3 py-4" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTransfers.has(transactionId)}
+                      onChange={() => onToggleTransfer(transactionId)}
+                      className="rounded border-gray-300"
+                    />
+                  </td>
+                )}
                 <td className="px-6 py-4 font-mono text-xs break-all">{transfer.from}</td>
                 <td className="px-6 py-4 font-mono text-xs break-all">{transfer.to}</td>
                 <td className="px-6 py-4 font-mono text-xs break-all">{transfer.tokenOwner}</td>
