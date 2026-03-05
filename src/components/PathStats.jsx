@@ -2,7 +2,72 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { calculateAllMetrics } from '@/components/metrics';
 
-const PathStats = ({ pathData, tokenInfo, nodeProfiles }) => {
+const shortAddr = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+
+const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow }) => {
+  const sorted = [...routes].sort((a, b) => b.flowNum - a.flowNum);
+  const allSelected = selectedRouteIds.size === routes.length && routes.length > 0;
+  const someSelected = selectedRouteIds.size > 0 && selectedRouteIds.size < routes.length;
+
+  return (
+    <Card className="p-4 mb-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-gray-900">
+          Route Selection
+          <span className="ml-2 text-xs text-gray-500 font-normal">
+            {selectedRouteIds.size}/{routes.length} selected
+          </span>
+        </h3>
+        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={(el) => { if (el) el.indeterminate = someSelected; }}
+            onChange={onToggleAllRoutes}
+            className="rounded border-gray-300"
+          />
+          All
+        </label>
+      </div>
+      <div className="space-y-1 max-h-64 overflow-y-auto">
+        {sorted.map((route) => {
+          const isSelected = selectedRouteIds.has(route.id);
+          const path = route.edges.map(e => shortAddr(e.from));
+          path.push(shortAddr(route.edges[route.edges.length - 1].to));
+          const pct = ((Number(route.flow) / Number(maxFlow)) * 100).toFixed(1);
+
+          return (
+            <label
+              key={route.id}
+              className={`
+                flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-gray-50 transition-colors
+                ${!isSelected ? 'opacity-40' : ''}
+              `}
+            >
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => onToggleRoute(route.id)}
+                className="rounded border-gray-300 flex-shrink-0"
+              />
+              <span className="font-mono text-xs text-gray-600 truncate flex-1">
+                {path.join(' → ')}
+              </span>
+              <span className="text-xs font-medium text-gray-700 flex-shrink-0 w-24 text-right">
+                {route.flowNum.toFixed(3)} CRC
+              </span>
+              <span className="text-xs text-gray-400 flex-shrink-0 w-14 text-right">
+                {pct}%
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </Card>
+  );
+};
+
+const PathStats = ({ pathData, tokenInfo, nodeProfiles, routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow }) => {
   if (!pathData) {
     return (
       <div className="text-center text-gray-500 py-8">
@@ -12,19 +77,11 @@ const PathStats = ({ pathData, tokenInfo, nodeProfiles }) => {
   }
 
   const metrics = calculateAllMetrics(pathData, tokenInfo, nodeProfiles);
-  
-  // Debug: Log what we're getting
-  console.log('Calculated metrics:', metrics);
-  metrics.forEach(m => {
-    if (m.visualization) {
-      console.log(`${m.name} has visualization:`, m.visualization);
-    }
-  });
-  
+
   // Group metrics by layout type (defaulting to 'full' if not specified)
   const fullWidthMetrics = metrics.filter(m => !m.layout || m.layout === 'full');
   const halfWidthMetrics = metrics.filter(m => m.layout === 'half');
-  
+
   // Pair half-width metrics for row display
   const halfWidthPairs = [];
   for (let i = 0; i < halfWidthMetrics.length; i += 2) {
@@ -35,7 +92,18 @@ const PathStats = ({ pathData, tokenInfo, nodeProfiles }) => {
   }
 
   return (
-    <div className="space-y-4">     
+    <div className="space-y-4">
+      {/* Route selection — drives flow matrix */}
+      {routes && routes.length > 0 && (
+        <RouteSelector
+          routes={routes}
+          selectedRouteIds={selectedRouteIds}
+          onToggleRoute={onToggleRoute}
+          onToggleAllRoutes={onToggleAllRoutes}
+          maxFlow={maxFlow}
+        />
+      )}
+
       {/* Render half-width metrics in pairs */}
       {halfWidthPairs.map((pair, index) => (
         <div key={`pair-${index}`} className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -43,7 +111,7 @@ const PathStats = ({ pathData, tokenInfo, nodeProfiles }) => {
           {pair.right && <MetricCard metric={pair.right} />}
         </div>
       ))}
-      
+
       {/* Render full-width metrics */}
       {fullWidthMetrics.map(metric => (
         <MetricCard key={metric.id} metric={metric} className="w-full" />
@@ -54,14 +122,7 @@ const PathStats = ({ pathData, tokenInfo, nodeProfiles }) => {
 
 const MetricCard = ({ metric, className = '' }) => {
   const Icon = metric.icon;
-  
-  // Debug log
-  console.log(`Rendering ${metric.name}:`, {
-    hasVisualization: !!metric.visualization,
-    value: metric.value,
-    details: metric.details
-  });
-  
+
   // Handle different value types
   const renderValue = (value) => {
     if (typeof value === 'object' && value !== null) {
@@ -73,7 +134,7 @@ const MetricCard = ({ metric, className = '' }) => {
     }
     return value;
   };
-  
+
   return (
     <Card className={`p-4 ${className}`}>
       <div className="flex items-start space-x-3">

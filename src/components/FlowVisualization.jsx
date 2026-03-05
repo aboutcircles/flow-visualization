@@ -578,6 +578,11 @@ const FlowVisualization = () => {
                         tokenOwnerProfiles={tokenOwnerProfiles}
                         nodeProfiles={nodeProfiles}
                         tokenInfo={tokenInfo}
+                        routes={routes}
+                        selectedRouteIds={selectedRouteIds}
+                        onToggleRoute={handleToggleRoute}
+                        onToggleAllRoutes={handleToggleAllRoutes}
+                        maxFlow={pathData.maxFlow}
                       />
                     </TabsContent>
                   </div>
