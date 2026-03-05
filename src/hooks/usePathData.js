@@ -11,7 +11,7 @@ export const usePathData = () => {
   const [error, setError] = useState(null);
   const [rawPathData, setRawPathData] = useState(null);
   const [processedPathData, setProcessedPathData] = useState(null);
-  const [showProcessed, setShowProcessed] = usePersistedState('show-processed', false);
+  const [showProcessed, setShowProcessed] = usePersistedState('show-processed', true);
   const [processingMeta, setProcessingMeta] = useState(null);
 
   // Derived: active path depends on toggle
