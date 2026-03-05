@@ -231,20 +231,6 @@ const FlowVisualization = () => {
     setSelectedTransfers(new Set(pathData.transfers.map(getTransactionId)));
   }, [pathData]);
 
-  // Slider changes auto-update selection (filter by capacity range + clean orphans)
-  useEffect(() => {
-    if (!pathData) return;
-    const rangeFiltered = new Set(
-      pathData.transfers
-        .filter(t => {
-          const v = Number(t.value) / 1e18;
-          return v >= minCapacity && v <= maxCapacity;
-        })
-        .map(getTransactionId)
-    );
-    setSelectedTransfers(cleanOrphanChains(rangeFiltered));
-  }, [pathData, minCapacity, maxCapacity, cleanOrphanChains]);
-
   // Remove dead-end chain nodes from a selection set. Iterates until stable.
   // Returns the cleaned set (new Set with orphans removed).
   const cleanOrphanChains = useCallback((selectedIds) => {
@@ -294,6 +280,20 @@ const FlowVisualization = () => {
 
     return current;
   }, [pathData, formData]);
+
+  // Slider changes auto-update selection (filter by capacity range + clean orphans)
+  useEffect(() => {
+    if (!pathData) return;
+    const rangeFiltered = new Set(
+      pathData.transfers
+        .filter(t => {
+          const v = Number(t.value) / 1e18;
+          return v >= minCapacity && v <= maxCapacity;
+        })
+        .map(getTransactionId)
+    );
+    setSelectedTransfers(cleanOrphanChains(rangeFiltered));
+  }, [pathData, minCapacity, maxCapacity, cleanOrphanChains]);
 
   const handleToggleTransfer = useCallback((transactionId) => {
     setSelectedTransfers(prev => {
