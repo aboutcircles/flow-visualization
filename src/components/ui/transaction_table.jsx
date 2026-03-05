@@ -69,7 +69,7 @@ const TransactionTable = ({ transfers, maxFlow, onTransactionSelect, selectedTra
   return (
     <div className="w-full overflow-x-auto shadow-sm rounded-lg border">
       <table className="w-full text-sm text-left">
-        <thead className="bg-gray-50 text-gray-600">
+        <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
           <tr>
             {selectedTransfers && (
               <th className="px-3 py-3 w-10">
