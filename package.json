@@ -11,6 +11,10 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@aboutcircles/sdk-pathfinder": "^0.1.24",
+    "@aboutcircles/sdk-rpc": "^0.1.24",
+    "@aboutcircles/sdk-types": "^0.1.24",
+    "@aboutcircles/sdk-utils": "^0.1.24",
     "@circles-sdk/data": "^0.23.0",
     "@circles-sdk/profiles": "^0.23.0",
     "@radix-ui/react-label": "^2.0.0",

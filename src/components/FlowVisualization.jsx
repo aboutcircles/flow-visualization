@@ -43,6 +43,11 @@ const FlowVisualization = () => {
   
   const {
     pathData,
+    rawPathData,
+    processedPathData,
+    showProcessed,
+    setShowProcessed,
+    processingMeta,
     loadPathData,
     isLoading,
     error,
@@ -283,6 +288,10 @@ const FlowVisualization = () => {
             isLoading={isLoading}
             error={error}
             pathData={pathData}
+            showProcessed={showProcessed}
+            setShowProcessed={setShowProcessed}
+            processedPathData={processedPathData}
+            processingMeta={processingMeta}
             minCapacity={minCapacity}
             setMinCapacity={setMinCapacity}
             maxCapacity={maxCapacity}

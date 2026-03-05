@@ -1,49 +1,80 @@
 import { useState, useEffect, useRef } from 'react';
-import { findPath, createCirclesClients, fetchTokenInfo, fetchProfiles, fetchTokenBalancesWithInfo } from '../services/circlesApi';
+import { findPath, processPath, createCirclesClients, fetchTokenInfo, fetchProfiles, fetchTokenBalancesWithInfo } from '../services/circlesApi';
 import { usePerformance } from '@/contexts/PerformanceContext';
 
 export const usePathData = () => {
-  const { circlesData, circlesProfiles } = useRef(createCirclesClients()).current;
+  const { circlesData, circlesProfiles, sdkRpc } = useRef(createCirclesClients()).current;
   const { config } = usePerformance();
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [pathData, setPathData] = useState(null);
-  
+  const [rawPathData, setRawPathData] = useState(null);
+  const [processedPathData, setProcessedPathData] = useState(null);
+  const [showProcessed, setShowProcessed] = useState(false);
+  const [processingMeta, setProcessingMeta] = useState(null);
+
+  // Derived: active path depends on toggle
+  const pathData = showProcessed && processedPathData ? processedPathData : rawPathData;
+
   const [wrappedTokens, setWrappedTokens] = useState([]);
   const [tokenInfo, setTokenInfo] = useState({});
   const [tokenOwnerProfiles, setTokenOwnerProfiles] = useState({});
   const [nodeProfiles, setNodeProfiles] = useState({});
   const [balancesByAccount, setBalancesByAccount] = useState({});
-  
+
   const [minCapacity, setMinCapacity] = useState(0);
   const [maxCapacity, setMaxCapacity] = useState(0);
   const [boundMin, setBoundMin] = useState(0);
   const [boundMax, setBoundMax] = useState(0);
 
+  // Keep a ref to the source address for post-processing
+  const sourceAddressRef = useRef(null);
+
   const loadPathData = async (formData) => {
     setIsLoading(true);
     setError(null);
-    
+
     // Reset all derived data when loading new path
     setWrappedTokens([]);
     setTokenInfo({});
     setTokenOwnerProfiles({});
     setNodeProfiles({});
     setBalancesByAccount({});
-    
+    setProcessedPathData(null);
+    setProcessingMeta(null);
+
+    sourceAddressRef.current = formData.From;
+
     try {
-      const data = await findPath(formData);
-      setPathData(data);
+      const data = await findPath(formData, sdkRpc);
+      setRawPathData(data);
       return data;
     } catch (err) {
       setError(`Failed to fetch path data: ${err.message}`);
-      setPathData(null);
+      setRawPathData(null);
       return null;
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Post-process path when raw data arrives
+  useEffect(() => {
+    if (!rawPathData || !sourceAddressRef.current) return;
+
+    const runProcessing = async () => {
+      try {
+        const result = await processPath(rawPathData, sourceAddressRef.current);
+        setProcessedPathData(result);
+        setProcessingMeta(result._meta);
+      } catch (err) {
+        console.error('Path post-processing failed:', err);
+        // Non-fatal — raw path is still usable
+      }
+    };
+
+    runProcessing();
+  }, [rawPathData]);
 
   // Combined loading of token info and balances for efficiency
   useEffect(() => {
@@ -150,6 +181,11 @@ export const usePathData = () => {
 
   return {
     pathData,
+    rawPathData,
+    processedPathData,
+    showProcessed,
+    setShowProcessed,
+    processingMeta,
     loadPathData,
     isLoading,
     error,
