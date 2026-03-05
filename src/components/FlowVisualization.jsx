@@ -242,9 +242,16 @@ const FlowVisualization = () => {
     setSelectedRouteIds(new Set(decomposed.map(r => r.id)));
   }, [pathData, formData.From, formData.To]);
 
+  // Skip next slider effect after manual toggle (prevents overwrite)
+  const skipSliderEffectRef = useRef(false);
+
   // Slider filters routes by flow threshold
   useEffect(() => {
     if (routes.length === 0) return;
+    if (skipSliderEffectRef.current) {
+      skipSliderEffectRef.current = false;
+      return;
+    }
     setSelectedRouteIds(
       new Set(
         routes
@@ -266,21 +273,29 @@ const FlowVisualization = () => {
     setMaxCapacity(max);
   }, [routes]);
 
+  const resetSliderToFull = useCallback(() => {
+    skipSliderEffectRef.current = true;
+    setMinCapacity(boundMin);
+    setMaxCapacity(boundMax);
+  }, [boundMin, boundMax, setMinCapacity, setMaxCapacity]);
+
   const handleToggleRoute = useCallback((routeId) => {
+    resetSliderToFull();
     setSelectedRouteIds(prev => {
       const next = new Set(prev);
       if (next.has(routeId)) next.delete(routeId);
       else next.add(routeId);
       return next;
     });
-  }, []);
+  }, [resetSliderToFull]);
 
   const handleToggleAllRoutes = useCallback(() => {
+    resetSliderToFull();
     setSelectedRouteIds(prev => {
       if (prev.size === routes.length) return new Set();
       return new Set(routes.map(r => r.id));
     });
-  }, [routes]);
+  }, [routes, resetSliderToFull]);
 
   // Click node in graph → remove all routes passing through that node
   const handleNodeRemove = useCallback((nodeId) => {
@@ -289,6 +304,7 @@ const FlowVisualization = () => {
     const sink = formData.To.toLowerCase();
     if (id === source || id === sink) return;
 
+    resetSliderToFull();
     setSelectedRouteIds(prev => {
       const next = new Set(prev);
       for (const route of routes) {
@@ -300,7 +316,7 @@ const FlowVisualization = () => {
       }
       return next;
     });
-  }, [routes, formData]);
+  }, [routes, formData, resetSliderToFull]);
 
   // Build filtered path data from selected routes
   const filteredPathData = useMemo(() => {

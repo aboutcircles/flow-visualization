@@ -134,6 +134,7 @@ const PathFinderForm = ({
             onToggle={handleStagingToggle}
             label="Use Staging Endpoint"
           />
+          <InfoTip text={`Prod: rpc.aboutcircles.com\nStaging: staging.circlesubi.network\n\nCurrently using: ${formData.UseStaging ? 'staging.circlesubi.network' : 'rpc.aboutcircles.com'}`} />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Max Transfers</label>
