@@ -5,7 +5,7 @@ export const useFormData = () => {
   const [formData, setFormData] = useState({
     From: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
     To: '0x14c16ce62d26fd51582a646e2e30a3267b1e6d7e',
-    FromTokens: '0x42cEDde51198D1773590311E2A340DC06B24cB37',
+    FromTokens: '',
     ToTokens: '',
     ExcludedFromTokens: '',
     ExcludedToTokens: '',
@@ -41,10 +41,20 @@ export const useFormData = () => {
         name === 'maxTransfers' ? 'MaxTransfers' :
         name;
 
-      // For other fields, store value as is
+      // Clear token filters when addresses change (stale filters cause empty results)
+      const updates = { [mappedFieldName]: value };
+      if (mappedFieldName === 'From') {
+        updates.FromTokens = '';
+        updates.ExcludedFromTokens = '';
+      }
+      if (mappedFieldName === 'To') {
+        updates.ToTokens = '';
+        updates.ExcludedToTokens = '';
+      }
+
       setFormData(prev => ({
         ...prev,
-        [mappedFieldName]: value
+        ...updates
       }));
     }
 
