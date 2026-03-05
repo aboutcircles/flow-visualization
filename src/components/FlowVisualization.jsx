@@ -407,7 +407,7 @@ const FlowVisualization = () => {
                 visualizationMode === 'graph' ? (
                   <CytoscapeVisualization
                     ref={cytoscapeRef}
-                    pathData={pathData}
+                    pathData={cherryPickedPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
                     nodeProfiles={nodeProfiles}
@@ -421,8 +421,8 @@ const FlowVisualization = () => {
                   />
                 ) : (
                   <SankeyVisualization
-                    ref={sankeyRef}  
-                    pathData={pathData}
+                    ref={sankeyRef}
+                    pathData={cherryPickedPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
                     nodeProfiles={nodeProfiles}
@@ -516,7 +516,7 @@ const FlowVisualization = () => {
                     
                     <TabsContent isActive={activeTab === 'stats'} className="h-full">
                       <PathStats
-                        pathData={pathData}
+                        pathData={cherryPickedPathData || pathData}
                         tokenOwnerProfiles={tokenOwnerProfiles}
                         nodeProfiles={nodeProfiles}
                         tokenInfo={tokenInfo}
