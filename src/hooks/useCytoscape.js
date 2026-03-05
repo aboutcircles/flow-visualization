@@ -525,6 +525,21 @@ export const useCytoscape = ({
         }
       });
 
+      // Right-click node/edge: copy address to clipboard
+      const copyToClipboard = (text, position) => {
+        navigator.clipboard.writeText(text).then(() => {
+          onTooltip({ text: `Copied: ${text}`, position: { x: position.x, y: position.y } });
+          setTimeout(() => onTooltip({ text: '', position: null }), 1500);
+        });
+      };
+      cy.on('cxttap', 'node', (event) => {
+        copyToClipboard(event.target.id(), event.renderedPosition);
+      });
+      cy.on('cxttap', 'edge', (event) => {
+        const d = event.target.data();
+        copyToClipboard(d.tokenOwner || `${d.source}→${d.target}`, event.renderedPosition);
+      });
+
       // Node click: remove node and its chain from selection
       if (onNodeRemoveRef.current) {
         cy.on('click', 'node', (event) => {

@@ -124,7 +124,7 @@ const CytoscapeVisualization = forwardRef(({
   return (
     <div className="relative w-full h-full">
       {/* Cytoscape container */}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="w-full h-full" onContextMenu={(e) => e.preventDefault()} />
       
       {/* Controls overlay */}
       <div className="absolute top-4 left-4 flex flex-col gap-2">
