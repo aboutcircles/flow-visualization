@@ -1,13 +1,23 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
+import { User, Hash } from 'lucide-react';
 import { calculateAllMetrics } from '@/components/metrics';
 
 const shortAddr = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 
-const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow }) => {
+const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRoutes, maxFlow, nodeProfiles }) => {
+  const [showNames, setShowNames] = useState(true);
   const sorted = [...routes].sort((a, b) => b.flowNum - a.flowNum);
   const allSelected = selectedRouteIds.size === routes.length && routes.length > 0;
   const someSelected = selectedRouteIds.size > 0 && selectedRouteIds.size < routes.length;
+
+  const displayAddr = (addr) => {
+    if (!showNames || !nodeProfiles) return shortAddr(addr);
+    const profile = nodeProfiles[addr.toLowerCase()];
+    if (!profile?.name) return shortAddr(addr);
+    const name = profile.name;
+    return name.length > 16 ? name.slice(0, 15) + '…' : name;
+  };
 
   return (
     <Card className="p-4 mb-4">
@@ -18,22 +28,31 @@ const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRou
             {selectedRouteIds.size}/{routes.length} selected
           </span>
         </h3>
-        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={allSelected}
-            ref={(el) => { if (el) el.indeterminate = someSelected; }}
-            onChange={onToggleAllRoutes}
-            className="rounded border-gray-300"
-          />
-          All
-        </label>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowNames(v => !v)}
+            className="p-1 rounded hover:bg-gray-200 transition-colors"
+            title={showNames ? 'Show addresses' : 'Show names'}
+          >
+            {showNames ? <Hash size={14} className="text-gray-400" /> : <User size={14} className="text-gray-400" />}
+          </button>
+          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={(el) => { if (el) el.indeterminate = someSelected; }}
+              onChange={onToggleAllRoutes}
+              className="rounded border-gray-300"
+            />
+            All
+          </label>
+        </div>
       </div>
       <div className="space-y-1 max-h-64 overflow-y-auto">
         {sorted.map((route) => {
           const isSelected = selectedRouteIds.has(route.id);
-          const path = route.edges.map(e => shortAddr(e.from));
-          path.push(shortAddr(route.edges[route.edges.length - 1].to));
+          const path = route.edges.map(e => displayAddr(e.from));
+          path.push(displayAddr(route.edges[route.edges.length - 1].to));
           const pct = ((Number(route.flow) / Number(maxFlow)) * 100).toFixed(1);
 
           return (
@@ -50,7 +69,7 @@ const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRou
                 onChange={() => onToggleRoute(route.id)}
                 className="rounded border-gray-300 flex-shrink-0"
               />
-              <span className="font-mono text-xs text-gray-600 truncate flex-1">
+              <span className={`text-xs text-gray-600 truncate flex-1 ${showNames ? '' : 'font-mono'}`}>
                 {path.join(' → ')}
               </span>
               <span className="text-xs font-medium text-gray-700 flex-shrink-0 w-24 text-right">
@@ -101,6 +120,7 @@ const PathStats = ({ pathData, tokenInfo, nodeProfiles, routes, selectedRouteIds
           onToggleRoute={onToggleRoute}
           onToggleAllRoutes={onToggleAllRoutes}
           maxFlow={maxFlow}
+          nodeProfiles={nodeProfiles}
         />
       )}
 

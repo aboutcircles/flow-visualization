@@ -575,6 +575,7 @@ const FlowVisualization = () => {
                         maxFlow={pathData.maxFlow}
                         onTransactionSelect={handleTransactionSelect}
                         selectedTransactionId={selectedTransactionId}
+                        nodeProfiles={nodeProfiles}
                       />
                     </TabsContent>
                     
