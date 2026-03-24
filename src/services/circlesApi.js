@@ -392,3 +392,49 @@ export const fetchProfiles = async (circlesProfiles, addresses, useCache = true)
 };
 
 export const fetchTokenBalances = fetchTokenBalancesWithInfo;
+
+export const fetchAddressTokenBalances = async (address, useCache = true) => {
+  if (!address) return [];
+
+  const normalizedAddress = address.toLowerCase();
+  const cacheKey = normalizedAddress;
+
+  if (useCache) {
+    const cached = cacheService.get('sourceBalances', cacheKey);
+    if (cached) return cached;
+  }
+
+  try {
+    const res = await fetch(API_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'circles_getTokenBalances',
+        params: [normalizedAddress]
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error(`Token balances request failed with status ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (data.error) {
+      throw new Error(data.error.message || 'RPC error while fetching token balances');
+    }
+
+    const rows = Array.isArray(data.result) ? data.result : [];
+
+    if (useCache) {
+      const ttl = cacheService.getTTLByType('tokenInfo');
+      cacheService.set('sourceBalances', cacheKey, rows, ttl);
+    }
+
+    return rows;
+  } catch (error) {
+    console.error('Error fetching source token balances:', error);
+    throw error;
+  }
+};

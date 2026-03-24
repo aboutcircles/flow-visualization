@@ -25,6 +25,9 @@ const FlowVisualization = () => {
   const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
   const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
   const [showNames, setShowNames] = usePersistedState('show-names', true);
+  const [quickFromTokenFilter, setQuickFromTokenFilter] = usePersistedState('quick-from-token-filter', []);
+  const [quickFromFilterEnabled, setQuickFromFilterEnabled] = usePersistedState('quick-from-filter-enabled', false);
+  const [sourceBalanceSort, setSourceBalanceSort] = usePersistedState('source-balance-sort', { key: 'crc', direction: 'desc' });
   // selectedTransfers removed — route-based selection via selectedRouteIds
   const cytoscapeRef = useRef(null);
   const sankeyRef = useRef(null);
@@ -59,6 +62,9 @@ const FlowVisualization = () => {
     tokenOwnerProfiles,
     nodeProfiles,
     balancesByAccount,
+    sourceBalances,
+    sourceBalancesLoading,
+    sourceBalancesError,
     minCapacity,
     setMinCapacity,
     maxCapacity,
@@ -212,18 +218,180 @@ const FlowVisualization = () => {
     }
   }, [pathData, config.thresholds.veryLargeGraphEdgeCount, config.rendering.fastMode, shouldAutoSimplify, setPreset, visualizationMode]);
   
-  const handleFindPath = useCallback(async (overrideFormData) => {
+  const formatBalanceNum = useCallback((value) => {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return '0';
+    if (Math.abs(num) < 0.000001 && num !== 0) return num.toExponential(3);
+    return num.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  }, []);
+
+  const parseComparableNumeric = useCallback((value) => {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string') {
+      if (/^-?\d+$/.test(value)) {
+        try {
+          return BigInt(value);
+        } catch {
+          // fall through
+        }
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, []);
+
+  const sortedSourceBalances = useMemo(() => {
+    if (!Array.isArray(sourceBalances)) return [];
+    const rows = [...sourceBalances];
+    const { key, direction } = sourceBalanceSort;
+    const factor = direction === 'asc' ? 1 : -1;
+
+    rows.sort((a, b) => {
+      const av = parseComparableNumeric(a?.[key]);
+      const bv = parseComparableNumeric(b?.[key]);
+
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (typeof av === 'bigint' && typeof bv === 'bigint') {
+        return av === bv ? 0 : (av > bv ? factor : -factor);
+      }
+
+      const an = Number(av);
+      const bn = Number(bv);
+      if (an === bn) return 0;
+      return (an > bn ? 1 : -1) * factor;
+    });
+
+    return rows;
+  }, [sourceBalances, sourceBalanceSort, parseComparableNumeric]);
+
+  const normalizedQuickFromFilter = useMemo(
+    () => (Array.isArray(quickFromTokenFilter)
+      ? quickFromTokenFilter.map(a => a.toLowerCase())
+      : []),
+    [quickFromTokenFilter]
+  );
+
+  const buildRequestFormData = useCallback((baseFormData, quickOverride) => {
+    const tokens = (quickOverride?.tokens ?? normalizedQuickFromFilter)
+      .map(a => a.toLowerCase())
+      .filter(Boolean);
+    const enabled = quickOverride?.enabled ?? quickFromFilterEnabled;
+
+    if (!enabled || tokens.length === 0) return baseFormData;
+
+    // Non-destructive integration: do not mutate the persisted form state.
+    // We only patch the request payload so quick filter and regular token UI
+    // can coexist.
+    return {
+      ...baseFormData,
+      FromTokens: tokens.join(','),
+      ExcludedFromTokens: '',
+      IsFromTokensExcluded: false,
+    };
+  }, [normalizedQuickFromFilter, quickFromFilterEnabled]);
+
+  const executeFindPath = useCallback(async (requestData) => {
     autoSimplifiedRef.current = false;
     setSelectedTransactionId(null);
     clearHighlights();
 
-    await loadPathData(overrideFormData || formData);
-  }, [formData, loadPathData, clearHighlights]);
+    await loadPathData(requestData);
+  }, [loadPathData, clearHighlights]);
+
+  const handleFindPath = useCallback(async (overrideFormData) => {
+    const baseData = overrideFormData || formData;
+    const requestData = buildRequestFormData(baseData);
+
+    await executeFindPath(requestData);
+  }, [formData, buildRequestFormData, executeFindPath]);
+
+  const isQuickTokenSelected = useCallback((tokenAddress) => {
+    if (!tokenAddress) return false;
+    return normalizedQuickFromFilter.includes(tokenAddress.toLowerCase());
+  }, [normalizedQuickFromFilter]);
+
+  const toggleQuickToken = useCallback(async (tokenAddress) => {
+    if (!tokenAddress) return;
+    const normalized = tokenAddress.toLowerCase();
+    const nextTokens = normalizedQuickFromFilter.includes(normalized)
+      ? normalizedQuickFromFilter.filter(t => t !== normalized)
+      : [...normalizedQuickFromFilter, normalized];
+
+    setQuickFromTokenFilter(nextTokens);
+
+    if (quickFromFilterEnabled) {
+      const effectiveEnabled = nextTokens.length > 0;
+      setQuickFromFilterEnabled(effectiveEnabled);
+      await executeFindPath(buildRequestFormData(formData, { tokens: nextTokens, enabled: effectiveEnabled }));
+    }
+  }, [
+    normalizedQuickFromFilter,
+    setQuickFromTokenFilter,
+    quickFromFilterEnabled,
+    setQuickFromFilterEnabled,
+    executeFindPath,
+    buildRequestFormData,
+    formData,
+  ]);
+
+  const toggleQuickFilterEnabled = useCallback(async () => {
+    const nextEnabled = !quickFromFilterEnabled && normalizedQuickFromFilter.length > 0;
+    setQuickFromFilterEnabled(nextEnabled);
+    await executeFindPath(buildRequestFormData(formData, { tokens: normalizedQuickFromFilter, enabled: nextEnabled }));
+  }, [
+    quickFromFilterEnabled,
+    normalizedQuickFromFilter,
+    setQuickFromFilterEnabled,
+    executeFindPath,
+    buildRequestFormData,
+    formData,
+  ]);
+
+  const clearQuickFilterSelection = useCallback(async () => {
+    setQuickFromTokenFilter([]);
+    setQuickFromFilterEnabled(false);
+    await executeFindPath(buildRequestFormData(formData, { tokens: [], enabled: false }));
+  }, [
+    setQuickFromTokenFilter,
+    setQuickFromFilterEnabled,
+    executeFindPath,
+    buildRequestFormData,
+    formData,
+  ]);
+
+  const toggleSourceBalanceSort = useCallback((key) => {
+    setSourceBalanceSort(prev => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'desc' };
+    });
+  }, [setSourceBalanceSort]);
+
+  const sortIndicator = useCallback((key) => {
+    if (sourceBalanceSort.key !== key) return '↕';
+    return sourceBalanceSort.direction === 'asc' ? '↑' : '↓';
+  }, [sourceBalanceSort]);
 
   const handleTransactionSelect = useCallback((transactionId) => {
     setSelectedTransactionId(transactionId);
     setActiveTab('transactions');
   }, []);
+
+  const routeTokenInfoByIndex = useMemo(() => {
+    if (!rawPathData?.transfers?.length) return {};
+    return rawPathData.transfers.reduce((acc, transfer, idx) => {
+      const meta = tokenInfo?.[transfer.tokenOwner?.toLowerCase()];
+      if (meta) acc[idx] = meta;
+      return acc;
+    }, {});
+  }, [rawPathData, tokenInfo]);
 
   // --- Route-based flow decomposition ---
   const [routes, setRoutes] = useState([]);
@@ -594,17 +762,142 @@ const FlowVisualization = () => {
                   
                   <div className="flex-1 overflow-auto px-4 pb-4">
                     <TabsContent isActive={activeTab === 'transactions'} className="h-full overflow-hidden">
-                      <TransactionTable
-                        routes={routes}
-                        selectedRouteIds={selectedRouteIds}
-                        onToggleRoute={handleToggleRoute}
-                        onToggleAllRoutes={handleToggleAllRoutes}
-                        maxFlow={pathData.maxFlow}
-                        onTransactionSelect={handleTransactionSelect}
-                        selectedTransactionId={selectedTransactionId}
-                        nodeProfiles={nodeProfiles}
-                        showNames={showNames}
-                      />
+                      <div className="h-full flex flex-col gap-3">
+                        <div className="min-h-0 flex-1">
+                          <TransactionTable
+                            routes={routes}
+                            selectedRouteIds={selectedRouteIds}
+                            onToggleRoute={handleToggleRoute}
+                            onToggleAllRoutes={handleToggleAllRoutes}
+                            maxFlow={pathData.maxFlow}
+                            onTransactionSelect={handleTransactionSelect}
+                            selectedTransactionId={selectedTransactionId}
+                            nodeProfiles={nodeProfiles}
+                            tokenInfo={tokenInfo}
+                            routeTokenInfoByIndex={routeTokenInfoByIndex}
+                            showNames={showNames}
+                          />
+                        </div>
+
+                        <details className="border rounded-lg bg-white overflow-hidden">
+                          <summary className="px-3 py-2 cursor-pointer text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100">
+                            Source balances ({sortedSourceBalances.length})
+                          </summary>
+
+                          <div className="max-h-56 overflow-auto">
+                            <div className="px-3 py-2 border-b bg-white sticky top-0 z-20 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={toggleQuickFilterEnabled}
+                                  disabled={normalizedQuickFromFilter.length === 0 && !quickFromFilterEnabled}
+                                  className={`text-xs px-2 py-1 rounded border ${
+                                    quickFromFilterEnabled
+                                      ? 'bg-blue-600 text-white border-blue-600'
+                                      : 'bg-gray-100 text-gray-700 border-gray-300'
+                                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                >
+                                  Quick filter {quickFromFilterEnabled ? 'ON' : 'OFF'}
+                                </button>
+                                <span className="text-xs text-gray-500">
+                                  {normalizedQuickFromFilter.length} selected
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={clearQuickFilterSelection}
+                                disabled={normalizedQuickFromFilter.length === 0 && !quickFromFilterEnabled}
+                                className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300 disabled:opacity-50"
+                              >
+                                Clear
+                              </button>
+                            </div>
+
+                            {sourceBalancesLoading ? (
+                              <div className="px-3 py-2 text-xs text-gray-500">Loading source balances…</div>
+                            ) : sourceBalancesError ? (
+                              <div className="px-3 py-2 text-xs text-red-600">{sourceBalancesError}</div>
+                            ) : sortedSourceBalances.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-gray-500">No source balances found.</div>
+                            ) : (
+                              <table className="w-full text-xs text-left">
+                                <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
+                                  <tr>
+                                    <th className="px-3 py-2">Use</th>
+                                    <th className="px-3 py-2">Token</th>
+                                    <th className="px-3 py-2">Owner</th>
+                                    <th className="px-3 py-2 text-right">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleSourceBalanceSort('crc')}
+                                        className="inline-flex items-center gap-1 hover:text-gray-900"
+                                        title="Sort by CRC"
+                                      >
+                                        CRC <span className="text-[10px]">{sortIndicator('crc')}</span>
+                                      </button>
+                                    </th>
+                                    <th className="px-3 py-2 text-right">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleSourceBalanceSort('staticCircles')}
+                                        className="inline-flex items-center gap-1 hover:text-gray-900"
+                                        title="Sort by Static CRC"
+                                      >
+                                        Static CRC <span className="text-[10px]">{sortIndicator('staticCircles')}</span>
+                                      </button>
+                                    </th>
+                                    <th className="px-3 py-2">Wrapped</th>
+                                    <th className="px-3 py-2">Type</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {sortedSourceBalances.map((row) => {
+                                    const wrapped = row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper');
+                                    const cadence = typeof row?.isInflationary === 'boolean'
+                                      ? (row.isInflationary ? 'Static' : 'Demurraged')
+                                      : 'Unknown';
+
+                                    return (
+                                      <tr key={`${row.tokenAddress}-${row.tokenOwner}`} className="hover:bg-gray-50">
+                                        <td className="px-3 py-2">
+                                          <input
+                                            type="checkbox"
+                                            checked={isQuickTokenSelected(row.tokenAddress)}
+                                            onChange={() => toggleQuickToken(row.tokenAddress)}
+                                            className="rounded border-gray-300"
+                                            title="Include this source token in quick fromTokens filter"
+                                          />
+                                        </td>
+                                        <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
+                                          {row.tokenAddress?.slice(0, 6)}…{row.tokenAddress?.slice(-4)}
+                                        </td>
+                                        <td className="px-3 py-2 font-mono text-[11px] text-gray-600">
+                                          {row.tokenOwner?.slice(0, 6)}…{row.tokenOwner?.slice(-4)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.crc)}</td>
+                                        <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.staticCircles)}</td>
+                                        <td className="px-3 py-2">
+                                          <div className="flex items-center gap-1.5">
+                                            {wrapped && (
+                                              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                                                Wrapped
+                                              </span>
+                                            )}
+                                            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                              {cadence}
+                                            </span>
+                                          </div>
+                                        </td>
+                                        <td className="px-3 py-2 text-gray-500">{row.tokenType || '—'}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        </details>
+                      </div>
                     </TabsContent>
                     
                     <TabsContent isActive={activeTab === 'parameters'} className="h-full">

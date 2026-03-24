@@ -10,6 +10,8 @@ const TransactionTable = ({
   onTransactionSelect,
   selectedTransactionId,
   nodeProfiles,
+  tokenInfo,
+  routeTokenInfoByIndex,
   showNames = true
 }) => {
   const [expandedRoutes, setExpandedRoutes] = useState(new Set());
@@ -43,6 +45,39 @@ const TransactionTable = ({
     return name.length > 16 ? name.slice(0, 15) + '…' : name;
   };
 
+  const getTokenMeta = (edge) => {
+    const tokenOwner = edge?.tokenOwner;
+    if (!tokenOwner) return { isWrapped: false, cadence: 'Unknown' };
+
+    const tokenData =
+      routeTokenInfoByIndex?.[edge?.originalTransferIdx] ||
+      tokenInfo?.[tokenOwner.toLowerCase()];
+
+    const isWrapped = tokenData?.isWrapped || tokenData?.type?.includes('ERC20Wrapper') || false;
+    const cadence = typeof tokenData?.isInflationary === 'boolean'
+      ? (tokenData.isInflationary ? 'Static' : 'Demurraged')
+      : 'Unknown';
+
+    return { isWrapped, cadence };
+  };
+
+  const renderTokenBadges = (edge) => {
+    const { isWrapped, cadence } = getTokenMeta(edge);
+
+    return (
+      <span className="inline-flex items-center gap-1 ml-1.5">
+        {isWrapped && (
+          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+            Wrapped
+          </span>
+        )}
+        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
+          {cadence}
+        </span>
+      </span>
+    );
+  };
+
   // Sort routes by flow descending
   const sortedRoutes = [...routes].sort((a, b) => b.flowNum - a.flowNum);
 
@@ -72,8 +107,6 @@ const TransactionTable = ({
           {sortedRoutes.map((route) => {
             const isSelected = selectedRouteIds.has(route.id);
             const isExpanded = expandedRoutes.has(route.id);
-            const path = route.edges.map(e => displayAddr(e.from));
-            path.push(displayAddr(route.edges[route.edges.length - 1].to));
 
             return (
               <React.Fragment key={route.id}>
@@ -104,7 +137,17 @@ const TransactionTable = ({
                     className={`px-4 py-3 text-xs text-gray-600 ${showNames ? '' : 'font-mono'}`}
                     onClick={() => toggleExpand(route.id)}
                   >
-                    {path.join(' → ')}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {route.edges.map((edge, idx) => (
+                        <React.Fragment key={`${route.id}-path-${idx}`}>
+                          <span>{displayAddr(edge.from)}</span>
+                          <span className="text-gray-400">→</span>
+                          <span>{displayAddr(edge.to)}</span>
+                          {renderTokenBadges(edge)}
+                          {idx < route.edges.length - 1 && <span className="text-gray-300 ml-1">|</span>}
+                        </React.Fragment>
+                      ))}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-center">{route.edges.length}</td>
                   <td className="px-4 py-3 font-medium">{formatValue(route.flow)}</td>
@@ -129,6 +172,7 @@ const TransactionTable = ({
                         <span className={`text-gray-500 ${showNames ? '' : 'font-mono'}`}>{displayAddr(edge.to)}</span>
                         <span className="ml-2 text-gray-400">token:</span>
                         <span className="ml-1 text-gray-500 font-mono">{shortAddr(edge.tokenOwner)}</span>
+                        {renderTokenBadges(edge)}
                       </td>
                       <td className="px-4 py-2 text-gray-500">{formatValue(edge.flow)}</td>
                       <td className="px-4 py-2 text-gray-400">{calculateFraction(edge.flow)}</td>

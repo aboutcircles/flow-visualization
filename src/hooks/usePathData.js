@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { findPath, processPath, createCirclesClients, fetchTokenInfo, fetchProfiles, fetchTokenBalancesWithInfo } from '../services/circlesApi';
+import { findPath, processPath, createCirclesClients, fetchTokenInfo, fetchProfiles, fetchTokenBalancesWithInfo, fetchAddressTokenBalances } from '../services/circlesApi';
 import { usePerformance } from '@/contexts/PerformanceContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 
@@ -22,6 +22,9 @@ export const usePathData = () => {
   const [tokenOwnerProfiles, setTokenOwnerProfiles] = useState({});
   const [nodeProfiles, setNodeProfiles] = useState({});
   const [balancesByAccount, setBalancesByAccount] = useState({});
+  const [sourceBalances, setSourceBalances] = useState([]);
+  const [sourceBalancesLoading, setSourceBalancesLoading] = useState(false);
+  const [sourceBalancesError, setSourceBalancesError] = useState(null);
 
   const [minCapacity, setMinCapacity] = useState(0);
   const [maxCapacity, setMaxCapacity] = useState(0);
@@ -41,6 +44,9 @@ export const usePathData = () => {
     setTokenOwnerProfiles({});
     setNodeProfiles({});
     setBalancesByAccount({});
+    setSourceBalances([]);
+    setSourceBalancesLoading(true);
+    setSourceBalancesError(null);
     setProcessedPathData(null);
     setProcessingMeta(null);
 
@@ -49,10 +55,24 @@ export const usePathData = () => {
     try {
       const data = await findPath(formData, sdkRpc);
       setRawPathData(data);
+
+      try {
+        const balances = await fetchAddressTokenBalances(
+          formData.From,
+          config.data.cacheEnabled
+        );
+        setSourceBalances(balances);
+      } catch (balanceErr) {
+        setSourceBalancesError(balanceErr.message || 'Failed to fetch source balances');
+      } finally {
+        setSourceBalancesLoading(false);
+      }
+
       return data;
     } catch (err) {
       setError(`Failed to fetch path data: ${err.message}`);
       setRawPathData(null);
+      setSourceBalancesLoading(false);
       return null;
     } finally {
       setIsLoading(false);
@@ -77,36 +97,44 @@ export const usePathData = () => {
     runProcessing();
   }, [rawPathData]);
 
-  // Combined loading of token info and balances for efficiency
+  // Load token info from raw path so wrapped metadata is preserved even when
+  // "Resolve Wrappers" is enabled and displayed path uses resolved avatars.
   useEffect(() => {
-    if (!pathData) return;
+    if (!rawPathData) return;
     
-    const loadDataEfficiently = async () => {
-      // Get all addresses involved
-      const addresses = Array.from(new Set(
-        pathData.transfers.flatMap(t => [t.from.toLowerCase(), t.to.toLowerCase()])
-      ));
-      
-      // Load token info first (with heavy caching)
+    const loadTokenInfo = async () => {
       const { wrapped, tokenInfo: info } = await fetchTokenInfo(
         circlesData, 
-        pathData.transfers,
+        rawPathData.transfers,
         config.data.cacheEnabled
       );
       setWrappedTokens(wrapped);
       setTokenInfo(info);
-      
-      // Load balances only if needed for gradients/capacity
-      if (config.rendering.features.edgeGradients || 
-          config.rendering.features.overCapacityHighlight || 
-          !config.data.lazyLoadBalances) {
-        const { balances } = await fetchTokenBalancesWithInfo(addresses, pathData.transfers);
-        setBalancesByAccount(balances);
-      }
     };
 
-    loadDataEfficiently();
-  }, [pathData, circlesData, config.data.cacheEnabled, config.rendering.features, config.data.lazyLoadBalances]);
+    loadTokenInfo();
+  }, [rawPathData, circlesData, config.data.cacheEnabled]);
+
+  // Load balances only if needed for gradients/capacity
+  useEffect(() => {
+    if (!pathData) return;
+
+    if (!config.rendering.features.edgeGradients &&
+        !config.rendering.features.overCapacityHighlight &&
+        config.data.lazyLoadBalances) {
+      return;
+    }
+
+    const loadBalances = async () => {
+      const addresses = Array.from(new Set(
+        pathData.transfers.flatMap(t => [t.from.toLowerCase(), t.to.toLowerCase()])
+      ));
+      const { balances } = await fetchTokenBalancesWithInfo(addresses, pathData.transfers);
+      setBalancesByAccount(balances);
+    };
+
+    loadBalances();
+  }, [pathData, config.rendering.features, config.data.lazyLoadBalances]);
 
   // Load profiles for token owners
   useEffect(() => {
@@ -183,6 +211,9 @@ export const usePathData = () => {
     tokenOwnerProfiles,
     nodeProfiles,
     balancesByAccount,
+    sourceBalances,
+    sourceBalancesLoading,
+    sourceBalancesError,
     minCapacity,
     setMinCapacity,
     maxCapacity,
