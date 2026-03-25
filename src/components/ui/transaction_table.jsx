@@ -12,6 +12,7 @@ const TransactionTable = ({
   nodeProfiles,
   tokenInfo,
   routeTokenInfoByIndex,
+  tokenMetaByTokenOwner,
   showNames = true
 }) => {
   const [expandedRoutes, setExpandedRoutes] = useState(new Set());
@@ -47,16 +48,19 @@ const TransactionTable = ({
 
   const getTokenMeta = (edge) => {
     const tokenOwner = edge?.tokenOwner;
-    if (!tokenOwner) return { isWrapped: false, cadence: 'Unknown' };
+    if (!tokenOwner) return { isWrapped: false, cadence: null };
+
+    const normalizedOwner = tokenOwner.toLowerCase();
 
     const tokenData =
       routeTokenInfoByIndex?.[edge?.originalTransferIdx] ||
-      tokenInfo?.[tokenOwner.toLowerCase()];
+      tokenInfo?.[normalizedOwner] ||
+      tokenMetaByTokenOwner?.[normalizedOwner];
 
     const isWrapped = tokenData?.isWrapped || tokenData?.type?.includes('ERC20Wrapper') || false;
     const cadence = typeof tokenData?.isInflationary === 'boolean'
       ? (tokenData.isInflationary ? 'Static' : 'Demurraged')
-      : 'Unknown';
+      : null;
 
     return { isWrapped, cadence };
   };
@@ -64,16 +68,13 @@ const TransactionTable = ({
   const renderTokenBadges = (edge) => {
     const { isWrapped, cadence } = getTokenMeta(edge);
 
+    // Route badges are only shown for wrapped tokens, and only as cadence
+    // (Static/Demurraged). Regular CRC is the default and stays unlabeled.
+    if (!isWrapped || !cadence) return null;
+
     return (
-      <span className="inline-flex items-center gap-1 ml-1.5">
-        {isWrapped && (
-          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
-            Wrapped
-          </span>
-        )}
-        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
-          {cadence}
-        </span>
+      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
+        {cadence}
       </span>
     );
   };
@@ -144,7 +145,7 @@ const TransactionTable = ({
                           <span className="text-gray-400">→</span>
                           <span>{displayAddr(edge.to)}</span>
                           {renderTokenBadges(edge)}
-                          {idx < route.edges.length - 1 && <span className="text-gray-300 ml-1">|</span>}
+                          {idx < route.edges.length - 1 && <span className="text-gray-300 mx-1">|</span>}
                         </React.Fragment>
                       ))}
                     </div>

@@ -176,6 +176,26 @@ export const useFormData = () => {
     }));
   };
 
+  const applyFormUpdates = useCallback((updatesOrUpdater) => {
+    setFormData(prev => {
+      if (typeof updatesOrUpdater === 'function') {
+        return updatesOrUpdater(prev);
+      }
+      return {
+        ...prev,
+        ...updatesOrUpdater,
+      };
+    });
+  }, []);
+
+  const setFromTokensIncludeValue = useCallback((value) => {
+    setFormData(prev => ({
+      ...prev,
+      FromTokens: value,
+      IsFromTokensExcluded: false,
+    }));
+  }, []);
+
   return {
     formData,
     formErrors,
@@ -185,6 +205,8 @@ export const useFormData = () => {
     handleWithWrapToggle,
     handleStagingToggle,
     handleFromTokensExclusionToggle,
-    handleToTokensExclusionToggle
+    handleToTokensExclusionToggle,
+    applyFormUpdates,
+    setFromTokensIncludeValue,
   };
 };

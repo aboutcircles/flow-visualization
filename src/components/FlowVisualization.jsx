@@ -5,6 +5,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { decomposeFlow, transfersFromRoutes } from '@/utils/flowDecomposition';
+import { parseAddressList } from '@/services/circlesApi';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
@@ -25,7 +26,6 @@ const FlowVisualization = () => {
   const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
   const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
   const [showNames, setShowNames] = usePersistedState('show-names', true);
-  const [quickFromTokenFilter, setQuickFromTokenFilter] = usePersistedState('quick-from-token-filter', []);
   const [quickFromFilterEnabled, setQuickFromFilterEnabled] = usePersistedState('quick-from-filter-enabled', false);
   const [sourceBalanceSort, setSourceBalanceSort] = usePersistedState('source-balance-sort', { key: 'crc', direction: 'desc' });
   // selectedTransfers removed — route-based selection via selectedRouteIds
@@ -44,7 +44,8 @@ const FlowVisualization = () => {
     handleWithWrapToggle,
     handleStagingToggle,
     handleFromTokensExclusionToggle,
-    handleToTokensExclusionToggle
+    handleToTokensExclusionToggle,
+    setFromTokensIncludeValue,
   } = useFormData();
   
   const {
@@ -270,31 +271,10 @@ const FlowVisualization = () => {
     return rows;
   }, [sourceBalances, sourceBalanceSort, parseComparableNumeric]);
 
-  const normalizedQuickFromFilter = useMemo(
-    () => (Array.isArray(quickFromTokenFilter)
-      ? quickFromTokenFilter.map(a => a.toLowerCase())
-      : []),
-    [quickFromTokenFilter]
-  );
-
-  const buildRequestFormData = useCallback((baseFormData, quickOverride) => {
-    const tokens = (quickOverride?.tokens ?? normalizedQuickFromFilter)
-      .map(a => a.toLowerCase())
-      .filter(Boolean);
-    const enabled = quickOverride?.enabled ?? quickFromFilterEnabled;
-
-    if (!enabled || tokens.length === 0) return baseFormData;
-
-    // Non-destructive integration: do not mutate the persisted form state.
-    // We only patch the request payload so quick filter and regular token UI
-    // can coexist.
-    return {
-      ...baseFormData,
-      FromTokens: tokens.join(','),
-      ExcludedFromTokens: '',
-      IsFromTokensExcluded: false,
-    };
-  }, [normalizedQuickFromFilter, quickFromFilterEnabled]);
+  const normalizedFromTokens = useMemo(() => {
+    if (formData.IsFromTokensExcluded) return [];
+    return parseAddressList(formData.FromTokens).map(a => a.toLowerCase());
+  }, [formData.FromTokens, formData.IsFromTokensExcluded]);
 
   const executeFindPath = useCallback(async (requestData) => {
     autoSimplifiedRef.current = false;
@@ -306,62 +286,67 @@ const FlowVisualization = () => {
 
   const handleFindPath = useCallback(async (overrideFormData) => {
     const baseData = overrideFormData || formData;
-    const requestData = buildRequestFormData(baseData);
-
-    await executeFindPath(requestData);
-  }, [formData, buildRequestFormData, executeFindPath]);
+    await executeFindPath(baseData);
+  }, [formData, executeFindPath]);
 
   const isQuickTokenSelected = useCallback((tokenAddress) => {
     if (!tokenAddress) return false;
-    return normalizedQuickFromFilter.includes(tokenAddress.toLowerCase());
-  }, [normalizedQuickFromFilter]);
+    return normalizedFromTokens.includes(tokenAddress.toLowerCase());
+  }, [normalizedFromTokens]);
 
   const toggleQuickToken = useCallback(async (tokenAddress) => {
     if (!tokenAddress) return;
     const normalized = tokenAddress.toLowerCase();
-    const nextTokens = normalizedQuickFromFilter.includes(normalized)
-      ? normalizedQuickFromFilter.filter(t => t !== normalized)
-      : [...normalizedQuickFromFilter, normalized];
+    const nextTokens = normalizedFromTokens.includes(normalized)
+      ? normalizedFromTokens.filter(t => t !== normalized)
+      : [...normalizedFromTokens, normalized];
+    const nextFromTokens = nextTokens.join(',');
 
-    setQuickFromTokenFilter(nextTokens);
+    setFromTokensIncludeValue(nextFromTokens);
 
     if (quickFromFilterEnabled) {
-      const effectiveEnabled = nextTokens.length > 0;
-      setQuickFromFilterEnabled(effectiveEnabled);
-      await executeFindPath(buildRequestFormData(formData, { tokens: nextTokens, enabled: effectiveEnabled }));
+      await executeFindPath({
+        ...formData,
+        FromTokens: nextFromTokens,
+        ExcludedFromTokens: '',
+        IsFromTokensExcluded: false,
+      });
     }
   }, [
-    normalizedQuickFromFilter,
-    setQuickFromTokenFilter,
+    normalizedFromTokens,
+    setFromTokensIncludeValue,
     quickFromFilterEnabled,
-    setQuickFromFilterEnabled,
     executeFindPath,
-    buildRequestFormData,
     formData,
   ]);
 
   const toggleQuickFilterEnabled = useCallback(async () => {
-    const nextEnabled = !quickFromFilterEnabled && normalizedQuickFromFilter.length > 0;
+    const nextEnabled = !quickFromFilterEnabled;
     setQuickFromFilterEnabled(nextEnabled);
-    await executeFindPath(buildRequestFormData(formData, { tokens: normalizedQuickFromFilter, enabled: nextEnabled }));
+    if (nextEnabled) {
+      await executeFindPath(formData);
+    }
   }, [
     quickFromFilterEnabled,
-    normalizedQuickFromFilter,
     setQuickFromFilterEnabled,
     executeFindPath,
-    buildRequestFormData,
     formData,
   ]);
 
   const clearQuickFilterSelection = useCallback(async () => {
-    setQuickFromTokenFilter([]);
-    setQuickFromFilterEnabled(false);
-    await executeFindPath(buildRequestFormData(formData, { tokens: [], enabled: false }));
+    setFromTokensIncludeValue('');
+    if (quickFromFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        FromTokens: '',
+        ExcludedFromTokens: '',
+        IsFromTokensExcluded: false,
+      });
+    }
   }, [
-    setQuickFromTokenFilter,
-    setQuickFromFilterEnabled,
+    setFromTokensIncludeValue,
+    quickFromFilterEnabled,
     executeFindPath,
-    buildRequestFormData,
     formData,
   ]);
 
@@ -385,13 +370,44 @@ const FlowVisualization = () => {
   }, []);
 
   const routeTokenInfoByIndex = useMemo(() => {
-    if (!rawPathData?.transfers?.length) return {};
-    return rawPathData.transfers.reduce((acc, transfer, idx) => {
-      const meta = tokenInfo?.[transfer.tokenOwner?.toLowerCase()];
-      if (meta) acc[idx] = meta;
-      return acc;
-    }, {});
-  }, [rawPathData, tokenInfo]);
+    const byIndex = {};
+    const addMeta = (transfer, idx) => {
+      const owner = transfer?.tokenOwner?.toLowerCase?.();
+      if (!owner) return;
+      const meta = tokenInfo?.[owner];
+      if (meta) byIndex[idx] = meta;
+    };
+
+    rawPathData?.transfers?.forEach((transfer, idx) => addMeta(transfer, idx));
+    pathData?.transfers?.forEach((transfer, idx) => {
+      if (!byIndex[idx]) addMeta(transfer, idx);
+    });
+
+    return byIndex;
+  }, [rawPathData, pathData, tokenInfo]);
+
+  const tokenMetaByTokenOwner = useMemo(() => {
+    const byOwner = {};
+
+    Object.entries(tokenInfo || {}).forEach(([owner, meta]) => {
+      if (!owner || !meta) return;
+      byOwner[owner.toLowerCase()] = meta;
+    });
+
+    (sourceBalances || []).forEach((row) => {
+      const owner = row?.tokenAddress?.toLowerCase?.();
+      if (!owner || byOwner[owner]) return;
+      byOwner[owner] = {
+        token: owner,
+        type: row?.tokenType,
+        tokenType: row?.tokenType,
+        isWrapped: !!(row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper')),
+        isInflationary: row?.isInflationary,
+      };
+    });
+
+    return byOwner;
+  }, [tokenInfo, sourceBalances]);
 
   // --- Route-based flow decomposition ---
   const [routes, setRoutes] = useState([]);
@@ -499,12 +515,13 @@ const FlowVisualization = () => {
   }, [pathData, routes, selectedRouteIds]);
 
   // Route selection info for left panel
-  const routeSelectionInfo = pathData && selectedRouteIds.size < routes.length ? {
+  const routeSelectionInfo = pathData && routes.length > 0 ? {
     count: selectedRouteIds.size,
     total: routes.length,
     flow: routes
       .filter(r => selectedRouteIds.has(r.id))
       .reduce((s, r) => s + r.flowNum, 0),
+    isFiltered: selectedRouteIds.size < routes.length,
   } : null;
 
   // Handle resize
@@ -775,6 +792,7 @@ const FlowVisualization = () => {
                             nodeProfiles={nodeProfiles}
                             tokenInfo={tokenInfo}
                             routeTokenInfoByIndex={routeTokenInfoByIndex}
+                            tokenMetaByTokenOwner={tokenMetaByTokenOwner}
                             showNames={showNames}
                           />
                         </div>
@@ -790,23 +808,22 @@ const FlowVisualization = () => {
                                 <button
                                   type="button"
                                   onClick={toggleQuickFilterEnabled}
-                                  disabled={normalizedQuickFromFilter.length === 0 && !quickFromFilterEnabled}
                                   className={`text-xs px-2 py-1 rounded border ${
                                     quickFromFilterEnabled
                                       ? 'bg-blue-600 text-white border-blue-600'
                                       : 'bg-gray-100 text-gray-700 border-gray-300'
-                                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                  }`}
                                 >
                                   Quick filter {quickFromFilterEnabled ? 'ON' : 'OFF'}
                                 </button>
                                 <span className="text-xs text-gray-500">
-                                  {normalizedQuickFromFilter.length} selected
+                                  {normalizedFromTokens.length} selected
                                 </span>
                               </div>
                               <button
                                 type="button"
                                 onClick={clearQuickFilterSelection}
-                                disabled={normalizedQuickFromFilter.length === 0 && !quickFromFilterEnabled}
+                                disabled={normalizedFromTokens.length === 0}
                                 className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300 disabled:opacity-50"
                               >
                                 Clear
@@ -846,7 +863,7 @@ const FlowVisualization = () => {
                                         Static CRC <span className="text-[10px]">{sortIndicator('staticCircles')}</span>
                                       </button>
                                     </th>
-                                    <th className="px-3 py-2">Wrapped</th>
+                                    <th className="px-3 py-2">Label</th>
                                     <th className="px-3 py-2">Type</th>
                                   </tr>
                                 </thead>
@@ -855,7 +872,7 @@ const FlowVisualization = () => {
                                     const wrapped = row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper');
                                     const cadence = typeof row?.isInflationary === 'boolean'
                                       ? (row.isInflationary ? 'Static' : 'Demurraged')
-                                      : 'Unknown';
+                                      : null;
 
                                     return (
                                       <tr key={`${row.tokenAddress}-${row.tokenOwner}`} className="hover:bg-gray-50">
@@ -878,14 +895,11 @@ const FlowVisualization = () => {
                                         <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.staticCircles)}</td>
                                         <td className="px-3 py-2">
                                           <div className="flex items-center gap-1.5">
-                                            {wrapped && (
-                                              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
-                                                Wrapped
+                                            {wrapped && cadence && (
+                                              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                                {cadence}
                                               </span>
                                             )}
-                                            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                              {cadence}
-                                            </span>
                                           </div>
                                         </td>
                                         <td className="px-3 py-2 text-gray-500">{row.tokenType || '—'}</td>
