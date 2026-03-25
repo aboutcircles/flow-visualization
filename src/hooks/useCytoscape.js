@@ -10,9 +10,12 @@ cytoscape.use(dagre);
 
 export const useCytoscape = ({
   containerRef,
+  rawPathData,
   pathData,
   formData,
   wrappedTokens,
+  tokenInfo,
+  edgeCatalogByIndex,
   nodeProfiles,
   tokenOwnerProfiles,
   balancesByAccount,
@@ -29,6 +32,29 @@ export const useCytoscape = ({
   const onNodeRemoveRef = useRef(onNodeRemove);
   onNodeRemoveRef.current = onNodeRemove;
   const { config, updateStats } = usePerformance();
+  const normalizeAddress = (value) => (typeof value === 'string' ? value.toLowerCase() : '');
+  const getBalanceEntryForTransfer = (data) => {
+    const srcAddr = normalizeAddress(data?.source);
+    if (!srcAddr) return null;
+
+    const balanceMap = balancesByAccount[srcAddr] || {};
+    const candidates = [
+      data?.tokenAddress,
+      data?.tokenOwner,
+      data?.originalTokenOwner
+    ]
+      .map(normalizeAddress)
+      .filter(Boolean);
+
+    for (const tokenKey of candidates) {
+      const entry = balanceMap[tokenKey];
+      if (entry) {
+        return entry;
+      }
+    }
+
+    return null;
+  };
 
   // Initialize graph when pathData changes
   useEffect(() => {
@@ -94,11 +120,43 @@ export const useCytoscape = ({
 
     const edges = [];
     const edgeCountMap = new Map(); // Track edge counts between nodes
+    const transferKey = (transfer) => `${
+      (transfer?.from || '').toLowerCase()
+    }|${
+      (transfer?.to || '').toLowerCase()
+    }|${String(transfer?.value || '')}`;
+    const rawTransfersByKey = new Map();
+
+    (rawPathData?.transfers || []).forEach((rawTransfer) => {
+      const key = transferKey(rawTransfer);
+      const bucket = rawTransfersByKey.get(key) || [];
+      bucket.push(rawTransfer);
+      rawTransfersByKey.set(key, bucket);
+    });
     
     pathData.transfers.forEach((transfer, index) => {
+      const key = transferKey(transfer);
+      const rawTransferCandidates = rawTransfersByKey.get(key);
+      const rawTransfer = rawTransferCandidates?.length ? rawTransferCandidates.shift() : null;
       const fromAddr = transfer.from.toLowerCase();
       const toAddr = transfer.to.toLowerCase();
-      const tokenOwner = transfer.tokenOwner.toLowerCase();
+      const tokenOwner = (transfer.tokenOwner || '').toLowerCase();
+      const edgeCatalogEntry = edgeCatalogByIndex?.[index];
+      const originalTokenOwner = (edgeCatalogEntry?.originalTokenOwner || rawTransfer?.tokenOwner || transfer.tokenOwner || '').toLowerCase();
+      const tokenAddress = (
+        edgeCatalogEntry?.tokenAddress ||
+        rawTransfer?.token ||
+        rawTransfer?.tokenAddress ||
+        rawTransfer?.tokenOwner ||
+        transfer.token ||
+        transfer.tokenAddress ||
+        originalTokenOwner ||
+        tokenOwner
+      ).toLowerCase();
+      const isWrapped = edgeCatalogEntry?.isWrapped ?? false;
+      const isStaticWrapped = edgeCatalogEntry?.isStaticWrapped ?? false;
+      const tokenKind = edgeCatalogEntry?.tokenKind || 'unknown';
+      const wrappingType = edgeCatalogEntry?.wrappingType || (isWrapped ? 'wrapped-demurrage' : 'erc1155-demurrage');
 
       connectedNodes.add(fromAddr);
       connectedNodes.add(toAddr);
@@ -107,7 +165,7 @@ export const useCytoscape = ({
       const flowPercentage = ((Number(transfer.value) / Number(pathData.maxFlow)) * 100);
       
       // Create a unique key for this edge type
-      const edgeTypeKey = `${fromAddr}-${toAddr}-${tokenOwner}`;
+      const edgeTypeKey = `${fromAddr}-${toAddr}-${tokenAddress}`;
       const edgeCount = edgeCountMap.get(edgeTypeKey) || 0;
       edgeCountMap.set(edgeTypeKey, edgeCount + 1);
       
@@ -119,11 +177,15 @@ export const useCytoscape = ({
         weight: Math.max(1, Math.min(flowPercentage / 10, 10)),
         flowAtto: transfer.value,
         percentage: flowPercentage.toFixed(2),
-        tokenOwner: tokenOwner,
-        isWrapped: wrappedTokens.includes(tokenOwner),
+        tokenOwner: originalTokenOwner || tokenOwner,
+        tokenAddress,
+        isWrapped,
+        isStaticWrapped,
+        tokenKind,
+        wrappingType,
         originalFrom: transfer.from,
         originalTo: transfer.to,
-        originalTokenOwner: transfer.tokenOwner,
+        originalTokenOwner,
         transferIndex: index, // Store the original transfer index
         edgeTypeCount: edgeCount // Store which instance of this edge type this is
       };
@@ -245,8 +307,12 @@ export const useCytoscape = ({
       // Add style features
       if (config.rendering.features.wrappedTokenDashing) {
         styles.push({
-          selector: 'edge[?isWrapped]',
+          selector: 'edge[?isStaticWrapped]',
           style: { 'line-style': 'dashed' }
+        });
+        styles.push({
+          selector: 'edge[?isWrapped][!isStaticWrapped]',
+          style: { 'line-style': 'dotted' }
         });
       }
 
@@ -483,11 +549,18 @@ export const useCytoscape = ({
               if (tokenProfile?.name) {
                 tooltipText += `Token Owner: ${tokenProfile.name}\n`;
               }
-              tooltipText += `Token: ${data.tokenOwner}\n`;
+              tooltipText += `Token Owner Address: ${data.tokenOwner}\n`;
+              const tokenAddress = data.tokenAddress || data.tokenOwner;
+              tooltipText += `Token: ${tokenAddress}\n`;
+              if (data.tokenKind && data.tokenKind !== 'unknown') {
+                tooltipText += `Token Kind: ${data.tokenKind}\n`;
+              }
+              if (data.wrappingType) {
+                tooltipText += `Circles Type: ${data.wrappingType}\n`;
+              }
               
               // Add balance info if available
-              const srcAddr = data.source;
-              const balEntry = balancesByAccount[srcAddr]?.[data.tokenOwner];
+              const balEntry = getBalanceEntryForTransfer(data);
               if (balEntry) {
                 tooltipText += `Source balance: ${balEntry.crc.toFixed(6)} CRC\n`;
                 
@@ -573,7 +646,7 @@ export const useCytoscape = ({
       isInitializingRef.current = false;
     }
 
-  }, [pathData, formData, wrappedTokens, config.rendering.features, config.rendering.fastMode, updateStats, nodeProfiles, tokenOwnerProfiles, balancesByAccount, onTooltip, onTransactionSelect, layoutName]);
+  }, [pathData, rawPathData, formData, wrappedTokens, tokenInfo, edgeCatalogByIndex, config.rendering.features, config.rendering.fastMode, updateStats, nodeProfiles, tokenOwnerProfiles, balancesByAccount, onTooltip, onTransactionSelect, layoutName]);
 
   // Update edge styles when config changes
   useEffect(() => {
@@ -611,8 +684,10 @@ export const useCytoscape = ({
       // Update wrapped token dashing
       if (config.rendering.features.wrappedTokenDashing) {
         cy.edges().forEach(edge => {
-          if (edge.data('isWrapped')) {
+          if (edge.data('isStaticWrapped')) {
             edge.style('line-style', 'dashed');
+          } else if (edge.data('isWrapped')) {
+            edge.style('line-style', 'dotted');
           } else {
             edge.style('line-style', 'solid');
           }
@@ -649,8 +724,8 @@ export const useCytoscape = ({
 
     cy.batch(() => {
       cy.edges().forEach(edge => {
-        const srcAddr = edge.data('source');
-        const tokenAddr = edge.data('tokenOwner');
+        const edgeData = edge.data();
+        const tokenAddr = edgeData.tokenAddress || edgeData.tokenOwner;
 
         if (!tokenAddr) {
           // If no balance data yet, just show the edge normally
@@ -663,7 +738,7 @@ export const useCytoscape = ({
           return;
         }
 
-        const balEntry = balancesByAccount[srcAddr]?.[tokenAddr];
+        const balEntry = getBalanceEntryForTransfer(edgeData);
         if (!balEntry) {
           // No balance data for this edge
           if (config.rendering.features.edgeGradients) {

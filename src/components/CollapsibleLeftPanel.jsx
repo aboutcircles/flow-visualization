@@ -127,8 +127,14 @@ const CollapsibleLeftPanel = ({
           {pathData && (
             <div className="p-4 pt-0">
               <Card className="p-4">
-                <p className="text-sm font-medium">Max Flow</p>
-                <p className="text-lg">{(Number(pathData.maxFlow) / 1e18).toFixed(6)}</p>
+                <p className="text-sm font-medium">Pathfinder Max Flow</p>
+                <p className="text-lg">{(Number(pathData.maxFlow) / 1e18).toFixed(6)} CRC</p>
+                {routeSelectionInfo && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Selected routes flow: {routeSelectionInfo.flow.toFixed(6)} CRC
+                    {routeSelectionInfo.isFiltered ? ` (${routeSelectionInfo.count}/${routeSelectionInfo.total} routes)` : ' (all routes)'}
+                  </p>
+                )}
               </Card>
             </div>
           )}

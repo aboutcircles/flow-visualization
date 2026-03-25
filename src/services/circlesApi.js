@@ -12,6 +12,30 @@ import cacheService from './cacheService';
 export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
 export const STAGING_ENDPOINT = 'https://staging.circlesubi.network/';
 
+const fetchTokenBalancesForAddress = async (address) => {
+  const res = await fetch(API_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'circles_getTokenBalances',
+      params: [address]
+    })
+  });
+
+  if (!res.ok) {
+    throw new Error(`Token balances request failed with status ${res.status}`);
+  }
+
+  const data = await res.json();
+  if (data?.error) {
+    throw new Error(data.error.message || 'RPC error while fetching token balances');
+  }
+
+  return Array.isArray(data?.result) ? data.result : [];
+};
+
 
 export const createCirclesClients = () => {
   const legacyRpc = new LegacyCirclesRpc(API_ENDPOINT);
@@ -139,8 +163,11 @@ export const fetchTokenInfo = async (circlesData, transfers, useCache = true) =>
   if (!transfers || transfers.length === 0) return { wrapped: [], tokenInfo: {} };
 
   try {
+    const getTransferTokenKey = (transfer) =>
+      (transfer.token || transfer.tokenAddress || transfer.tokenOwner || '').toLowerCase();
+
     const tokenOwners = Array.from(
-      new Set(transfers.map(t => t.tokenOwner.toLowerCase()))
+      new Set(transfers.map(getTransferTokenKey).filter(Boolean))
     );
 
     console.log('Fetching token info for tokens:', tokenOwners);
@@ -178,7 +205,7 @@ export const fetchTokenInfo = async (circlesData, transfers, useCache = true) =>
     // Create a map of token -> account that holds it
     const tokenToAccount = {};
     for (const transfer of transfers) {
-      const token = transfer.tokenOwner.toLowerCase();
+      const token = getTransferTokenKey(transfer);
       if (missing.includes(token) && !tokenToAccount[token]) {
         // Use the from address as it should have the token
         tokenToAccount[token] = transfer.from.toLowerCase();
@@ -188,41 +215,27 @@ export const fetchTokenInfo = async (circlesData, transfers, useCache = true) =>
     // Get unique accounts we need to query
     const accountsToQuery = Array.from(new Set(Object.values(tokenToAccount)));
     
-    const buildBatch = (batch) => batch.map((addr, idx) => ({
-      jsonrpc: '2.0',
-      id: idx,
-      method: 'circles_getTokenBalances',
-      params: [addr]
-    }));
-    
-    // Fetch balances only for necessary accounts
+    // Fetch balances only for necessary accounts (unbatched RPC calls)
     for (let i = 0; i < accountsToQuery.length; i += 50) {
       const slice = accountsToQuery.slice(i, i + 50);
       try {
-        const res = await fetch(API_ENDPOINT, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(buildBatch(slice))
-        });
-        
-        if (!res.ok) {
-          console.error('Failed to fetch token info for batch:', slice);
-          continue;
-        }
+        const responses = await Promise.all(
+          slice.map(async (addr) => {
+            try {
+              const result = await fetchTokenBalancesForAddress(addr);
+              return { addr, result };
+            } catch (error) {
+              console.error('Failed to fetch token info for address:', addr, error);
+              return { addr, result: [] };
+            }
+          })
+        );
 
-        const rpcArray = await res.json();
-        rpcArray.forEach((rpc) => {
-          if (rpc.error) {
-            console.error('RPC error:', rpc.error);
-            return;
-          }
-          
-          // const accountAddr = slice[index]; // removed unused variable
-          
+        responses.forEach(({ result }) => {
           // Extract token info from balance results
-          rpc.result?.forEach((balanceEntry) => {
+          result.forEach((balanceEntry) => {
             const tokenAddr = balanceEntry.tokenAddress.toLowerCase();
-            
+
             // Only store info for tokens we're looking for
             if (missing.includes(tokenAddr) && !tokenInfoMap[tokenAddr]) {
               const info = {
@@ -232,17 +245,17 @@ export const fetchTokenInfo = async (circlesData, transfers, useCache = true) =>
                 version: balanceEntry.version,
                 isInflationary: balanceEntry.isInflationary
               };
-              
+
               tokenInfoMap[tokenAddr] = info;
-              
+
               // Cache the token info
               if (useCache) {
                 const ttl = cacheService.getTTLByType('tokenInfo');
                 cacheService.set('tokenInfo', tokenAddr, info, ttl);
               }
-              
+
               // Check if it's a wrapped token
-              if (balanceEntry.isWrapped || 
+              if (balanceEntry.isWrapped ||
                   balanceEntry.tokenType?.includes('ERC20Wrapper')) {
                 wrapped.push(tokenAddr);
               }
@@ -250,7 +263,7 @@ export const fetchTokenInfo = async (circlesData, transfers, useCache = true) =>
           });
         });
       } catch (error) {
-        console.error('Error fetching token info batch:', error);
+        console.error('Error fetching token info chunk:', error);
       }
     }
 
@@ -269,45 +282,36 @@ export const fetchTokenBalancesWithInfo = async (addresses, transfers) => {
   if (!addresses || addresses.length === 0) return { balances: {}, tokenInfo: {}, wrapped: [] };
   
   try {
+    const getTransferTokenKey = (transfer) =>
+      (transfer.token || transfer.tokenAddress || transfer.tokenOwner || '').toLowerCase();
+
     const uniqueAddresses = Array.from(new Set(addresses.map(addr => addr.toLowerCase())));
     const balancesByAccount = {};
     const tokenInfoMap = {};
     const wrapped = [];
     
     // Get tokens we need info for
-    const tokenOwners = new Set(transfers.map(t => t.tokenOwner.toLowerCase()));
-
-    const buildBatch = (batch) => batch.map((addr, idx) => ({
-      jsonrpc: '2.0',
-      id: idx,
-      method: 'circles_getTokenBalances',
-      params: [addr]
-    }));
+    const tokenOwners = new Set(transfers.map(getTransferTokenKey).filter(Boolean));
 
     for (let i = 0; i < uniqueAddresses.length; i += 50) {
       const slice = uniqueAddresses.slice(i, i + 50);
-      const res = await fetch(API_ENDPOINT, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(buildBatch(slice))
-      });
-      
-      if (!res.ok) {
-        console.error('Failed to fetch balances for batch:', slice);
-        continue;
-      }
+      const responses = await Promise.all(
+        slice.map(async (address) => {
+          try {
+            const result = await fetchTokenBalancesForAddress(address);
+            return { address, result };
+          } catch (error) {
+            console.error('Failed to fetch balances for address:', address, error);
+            return { address, result: [] };
+          }
+        })
+      );
 
-      const rpcArray = await res.json();
-      rpcArray.forEach((rpc) => {
-        if (rpc.error) {
-          console.error('RPC error for address:', slice[rpc.id], rpc.error);
-          return;
-        }
-        
-        const account = slice[rpc.id].toLowerCase();
+      responses.forEach(({ address, result }) => {
+        const account = address.toLowerCase();
         const map = {};
 
-        rpc.result?.forEach((row) => {
+        result.forEach((row) => {
           const tokenKey = row.tokenAddress.toLowerCase();
           map[tokenKey] = {
             crc: Number(row.circles || 0),
@@ -392,3 +396,54 @@ export const fetchProfiles = async (circlesProfiles, addresses, useCache = true)
 };
 
 export const fetchTokenBalances = fetchTokenBalancesWithInfo;
+
+export const fetchAddressTokenBalances = async (address, useCache = true) => {
+  if (!address) return [];
+
+  const normalizedAddress = address.toLowerCase();
+  const cacheKey = normalizedAddress;
+
+  if (useCache) {
+    const cached = cacheService.get('sourceBalances', cacheKey);
+    if (cached) return cached;
+  }
+
+  try {
+    const rows = await fetchTokenBalancesForAddress(normalizedAddress);
+
+    if (useCache) {
+      const ttl = cacheService.getTTLByType('tokenInfo');
+      cacheService.set('sourceBalances', cacheKey, rows, ttl);
+    }
+
+    return rows;
+  } catch (error) {
+    console.error('Error fetching source token balances:', error);
+    throw error;
+  }
+};
+
+export const fetchSinkTrustAvatars = async (sinkAddress, sdkRpc) => {
+  if (!sinkAddress || !sdkRpc?.trust?.getTrusts) return [];
+
+  try {
+    const trustRelations = await sdkRpc.trust.getTrusts(sinkAddress);
+    const seen = new Set();
+
+    return trustRelations
+      .map((relation) => ({
+        tokenAddress: relation?.objectAvatar?.toLowerCase?.() || '',
+        tokenOwner: relation?.objectAvatar?.toLowerCase?.() || '',
+        relation: relation?.relation || 'trusts',
+        timestamp: relation?.timestamp || null,
+      }))
+      .filter((row) => {
+        if (!row.tokenAddress || seen.has(row.tokenAddress)) return false;
+        seen.add(row.tokenAddress);
+        return true;
+      });
+  } catch (error) {
+    console.error('Error fetching sink trust avatars:', error);
+    throw error;
+  }
+};

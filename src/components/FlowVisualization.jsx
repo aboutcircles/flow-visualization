@@ -5,6 +5,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { decomposeFlow, transfersFromRoutes } from '@/utils/flowDecomposition';
+import { parseAddressList } from '@/services/circlesApi';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
@@ -23,14 +24,21 @@ const FlowVisualization = () => {
   const [activeTab, setActiveTab] = usePersistedState('active-tab', 'transactions');
   const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
   const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
+  const [sourceBalancesHeight, setSourceBalancesHeight] = usePersistedState('source-balances-height', 260);
   const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
   const [showNames, setShowNames] = usePersistedState('show-names', true);
+  const [quickFromFilterEnabled, setQuickFromFilterEnabled] = usePersistedState('quick-from-filter-enabled', false);
+  const [quickToFilterEnabled, setQuickToFilterEnabled] = usePersistedState('quick-to-filter-enabled', false);
+  const [sourceBalanceSort, setSourceBalanceSort] = usePersistedState('source-balance-sort', { key: 'crc', direction: 'desc' });
+  const [lowerPanelTab, setLowerPanelTab] = usePersistedState('lower-panel-tab', 'source');
   // selectedTransfers removed — route-based selection via selectedRouteIds
   const cytoscapeRef = useRef(null);
   const sankeyRef = useRef(null);
   const autoSimplifiedRef = useRef(false);
   const containerRef = useRef(null);
   const isDraggingRef = useRef(false);
+  const transactionsContentRef = useRef(null);
+  const isSourceBalancesDraggingRef = useRef(false);
   
   const { shouldAutoSimplify, setPreset, toggleFeature, config } = usePerformance();
   
@@ -41,7 +49,9 @@ const FlowVisualization = () => {
     handleWithWrapToggle,
     handleStagingToggle,
     handleFromTokensExclusionToggle,
-    handleToTokensExclusionToggle
+    handleToTokensExclusionToggle,
+    setFromTokensIncludeValue,
+    setToTokensIncludeValue,
   } = useFormData();
   
   const {
@@ -56,9 +66,16 @@ const FlowVisualization = () => {
     error,
     wrappedTokens,
     tokenInfo,
+    edgeCatalogByIndex,
     tokenOwnerProfiles,
     nodeProfiles,
     balancesByAccount,
+    sourceBalances,
+    sourceBalancesLoading,
+    sourceBalancesError,
+    sinkTrustRows,
+    sinkTrustLoading,
+    sinkTrustError,
     minCapacity,
     setMinCapacity,
     maxCapacity,
@@ -67,7 +84,7 @@ const FlowVisualization = () => {
     setBoundMin,
     boundMax,
     setBoundMax
-  } = usePathData();
+  } = usePathData(formData.To);
   
   // Helper function to get Cytoscape instance
   const getCyInstance = useCallback(() => {
@@ -212,18 +229,375 @@ const FlowVisualization = () => {
     }
   }, [pathData, config.thresholds.veryLargeGraphEdgeCount, config.rendering.fastMode, shouldAutoSimplify, setPreset, visualizationMode]);
   
-  const handleFindPath = useCallback(async (overrideFormData) => {
+  const formatBalanceNum = useCallback((value) => {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return '0';
+    if (Math.abs(num) < 0.000001 && num !== 0) return num.toExponential(3);
+    return num.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  }, []);
+
+  const parseComparableNumeric = useCallback((value) => {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string') {
+      if (/^-?\d+$/.test(value)) {
+        try {
+          return BigInt(value);
+        } catch {
+          // fall through
+        }
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, []);
+
+  const sortedSourceBalances = useMemo(() => {
+    if (!Array.isArray(sourceBalances)) return [];
+    const rows = [...sourceBalances];
+    const { key, direction } = sourceBalanceSort;
+    const factor = direction === 'asc' ? 1 : -1;
+
+    rows.sort((a, b) => {
+      const av = parseComparableNumeric(a?.[key]);
+      const bv = parseComparableNumeric(b?.[key]);
+
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (typeof av === 'bigint' && typeof bv === 'bigint') {
+        return av === bv ? 0 : (av > bv ? factor : -factor);
+      }
+
+      const an = Number(av);
+      const bn = Number(bv);
+      if (an === bn) return 0;
+      return (an > bn ? 1 : -1) * factor;
+    });
+
+    return rows;
+  }, [sourceBalances, sourceBalanceSort, parseComparableNumeric]);
+
+  const normalizedFromTokens = useMemo(() => {
+    if (formData.IsFromTokensExcluded) return [];
+    return parseAddressList(formData.FromTokens).map(a => a.toLowerCase());
+  }, [formData.FromTokens, formData.IsFromTokensExcluded]);
+
+  const normalizedToTokens = useMemo(() => {
+    if (formData.IsToTokensExcluded) return [];
+    return parseAddressList(formData.ToTokens).map(a => a.toLowerCase());
+  }, [formData.ToTokens, formData.IsToTokensExcluded]);
+
+  const selectedSourceCrcSum = useMemo(() => {
+    if (!Array.isArray(sourceBalances) || normalizedFromTokens.length === 0) return 0;
+
+    return sourceBalances.reduce((sum, row) => {
+      const tokenAddress = row?.tokenAddress?.toLowerCase();
+      if (!tokenAddress || !normalizedFromTokens.includes(tokenAddress)) return sum;
+
+      const crc = Number(row?.circles ?? row?.crc ?? 0);
+      return Number.isFinite(crc) ? sum + crc : sum;
+    }, 0);
+  }, [sourceBalances, normalizedFromTokens]);
+
+
+  const isWrappedSourceBalance = useCallback((row) => (
+    !!(row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper'))
+  ), []);
+
+  const isStaticSourceBalance = useCallback((row) => (
+    isWrappedSourceBalance(row) && row?.isInflationary === true
+  ), [isWrappedSourceBalance]);
+
+  const isDemurragedWrappedSourceBalance = useCallback((row) => (
+    isWrappedSourceBalance(row) && row?.isInflationary !== true
+  ), [isWrappedSourceBalance]);
+
+  const isRegular1155SourceBalance = useCallback((row) => (
+    !isWrappedSourceBalance(row)
+  ), [isWrappedSourceBalance]);
+
+  const isGroupSourceBalance = useCallback((row) => {
+    const tokenType = typeof row?.tokenType === 'string' ? row.tokenType.toLowerCase() : '';
+    const wrappedTokenType = typeof row?.wrappedTokenType === 'string' ? row.wrappedTokenType.toLowerCase() : '';
+
+    return tokenType.includes('group') || wrappedTokenType.includes('group');
+  }, []);
+
+  const executeFindPath = useCallback(async (requestData) => {
     autoSimplifiedRef.current = false;
     setSelectedTransactionId(null);
     clearHighlights();
 
-    await loadPathData(overrideFormData || formData);
-  }, [formData, loadPathData, clearHighlights]);
+    await loadPathData(requestData);
+  }, [loadPathData, clearHighlights]);
+
+  const selectQuickTokensByPredicate = useCallback(async (predicate) => {
+    const nextTokens = Array.from(new Set(
+      (sourceBalances || [])
+        .filter(predicate)
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const nextFromTokens = nextTokens.join(',');
+
+    setFromTokensIncludeValue(nextFromTokens);
+
+    if (quickFromFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        FromTokens: nextFromTokens,
+        ExcludedFromTokens: '',
+        IsFromTokensExcluded: false,
+      });
+    }
+  }, [sourceBalances, setFromTokensIncludeValue, quickFromFilterEnabled, executeFindPath, formData]);
+
+  const selectAllQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(() => true);
+  }, [selectQuickTokensByPredicate]);
+
+  const toggleSelectAllQuickTokens = useCallback(async () => {
+    const allTokenAddresses = Array.from(new Set(
+      (sourceBalances || [])
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const allSelected = allTokenAddresses.length > 0
+      && allTokenAddresses.every((token) => normalizedFromTokens.includes(token));
+
+    if (allSelected) {
+      await selectQuickTokensByPredicate(() => false);
+      return;
+    }
+
+    await selectAllQuickTokens();
+  }, [sourceBalances, normalizedFromTokens, selectQuickTokensByPredicate, selectAllQuickTokens]);
+
+  const selectWrappedQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isWrappedSourceBalance);
+  }, [selectQuickTokensByPredicate, isWrappedSourceBalance]);
+
+  const selectStaticQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isStaticSourceBalance);
+  }, [selectQuickTokensByPredicate, isStaticSourceBalance]);
+
+  const selectDemurragedQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isDemurragedWrappedSourceBalance);
+  }, [selectQuickTokensByPredicate, isDemurragedWrappedSourceBalance]);
+
+  const selectRegular1155QuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isRegular1155SourceBalance);
+  }, [selectQuickTokensByPredicate, isRegular1155SourceBalance]);
+
+  const selectGroupQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isGroupSourceBalance);
+  }, [selectQuickTokensByPredicate, isGroupSourceBalance]);
+
+  const handleFindPath = useCallback(async (overrideFormData) => {
+    const baseData = overrideFormData || formData;
+    await executeFindPath(baseData);
+  }, [formData, executeFindPath]);
+
+  const isQuickTokenSelected = useCallback((tokenAddress) => {
+    if (!tokenAddress) return false;
+    return normalizedFromTokens.includes(tokenAddress.toLowerCase());
+  }, [normalizedFromTokens]);
+
+  const toggleQuickToken = useCallback(async (tokenAddress) => {
+    if (!tokenAddress) return;
+    const normalized = tokenAddress.toLowerCase();
+    const nextTokens = normalizedFromTokens.includes(normalized)
+      ? normalizedFromTokens.filter(t => t !== normalized)
+      : [...normalizedFromTokens, normalized];
+    const nextFromTokens = nextTokens.join(',');
+
+    setFromTokensIncludeValue(nextFromTokens);
+
+    if (quickFromFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        FromTokens: nextFromTokens,
+        ExcludedFromTokens: '',
+        IsFromTokensExcluded: false,
+      });
+    }
+  }, [
+    normalizedFromTokens,
+    setFromTokensIncludeValue,
+    quickFromFilterEnabled,
+    executeFindPath,
+    formData,
+  ]);
+
+  const toggleQuickFilterEnabled = useCallback(async () => {
+    const nextEnabled = !quickFromFilterEnabled;
+    setQuickFromFilterEnabled(nextEnabled);
+    if (nextEnabled) {
+      await executeFindPath(formData);
+    }
+  }, [
+    quickFromFilterEnabled,
+    setQuickFromFilterEnabled,
+    executeFindPath,
+    formData,
+  ]);
+
+  const isQuickSinkTokenSelected = useCallback((tokenAddress) => {
+    if (!tokenAddress) return false;
+    return normalizedToTokens.includes(tokenAddress.toLowerCase());
+  }, [normalizedToTokens]);
+
+  const selectSinkQuickTokensByPredicate = useCallback(async (predicate) => {
+    const nextTokens = Array.from(new Set(
+      sinkTrustRows
+        .filter(predicate)
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const nextToTokens = nextTokens.join(',');
+
+    setToTokensIncludeValue(nextToTokens);
+
+    if (quickToFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        ToTokens: nextToTokens,
+        ExcludedToTokens: '',
+        IsToTokensExcluded: false,
+      });
+    }
+  }, [sinkTrustRows, setToTokensIncludeValue, quickToFilterEnabled, executeFindPath, formData]);
+
+  const toggleSelectAllSinkQuickTokens = useCallback(async () => {
+    const allTokenAddresses = Array.from(new Set(
+      sinkTrustRows
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const allSelected = allTokenAddresses.length > 0
+      && allTokenAddresses.every((token) => normalizedToTokens.includes(token));
+
+    await selectSinkQuickTokensByPredicate(allSelected ? () => false : () => true);
+  }, [sinkTrustRows, normalizedToTokens, selectSinkQuickTokensByPredicate]);
+
+  const toggleQuickSinkToken = useCallback(async (tokenAddress) => {
+    if (!tokenAddress) return;
+    const normalized = tokenAddress.toLowerCase();
+    const nextTokens = normalizedToTokens.includes(normalized)
+      ? normalizedToTokens.filter(t => t !== normalized)
+      : [...normalizedToTokens, normalized];
+    const nextToTokens = nextTokens.join(',');
+
+    setToTokensIncludeValue(nextToTokens);
+
+    if (quickToFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        ToTokens: nextToTokens,
+        ExcludedToTokens: '',
+        IsToTokensExcluded: false,
+      });
+    }
+  }, [
+    normalizedToTokens,
+    setToTokensIncludeValue,
+    quickToFilterEnabled,
+    executeFindPath,
+    formData,
+  ]);
+
+  const toggleQuickToFilterEnabled = useCallback(async () => {
+    const nextEnabled = !quickToFilterEnabled;
+    setQuickToFilterEnabled(nextEnabled);
+    if (nextEnabled) {
+      await executeFindPath(formData);
+    }
+  }, [
+    quickToFilterEnabled,
+    setQuickToFilterEnabled,
+    executeFindPath,
+    formData,
+  ]);
+
+  const clearQuickFilterSelection = useCallback(async () => {
+    setFromTokensIncludeValue('');
+    if (quickFromFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        FromTokens: '',
+        ExcludedFromTokens: '',
+        IsFromTokensExcluded: false,
+      });
+    }
+  }, [
+    setFromTokensIncludeValue,
+    quickFromFilterEnabled,
+    executeFindPath,
+    formData,
+  ]);
+
+  const toggleSourceBalanceSort = useCallback((key) => {
+    setSourceBalanceSort(prev => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'desc' };
+    });
+  }, [setSourceBalanceSort]);
+
+  const sortIndicator = useCallback((key) => {
+    if (sourceBalanceSort.key !== key) return '↕';
+    return sourceBalanceSort.direction === 'asc' ? '↑' : '↓';
+  }, [sourceBalanceSort]);
 
   const handleTransactionSelect = useCallback((transactionId) => {
     setSelectedTransactionId(transactionId);
     setActiveTab('transactions');
   }, []);
+
+  const routeTokenInfoByIndex = useMemo(() => {
+    const byIndex = {};
+    const addMeta = (transfer, idx) => {
+      const owner = transfer?.tokenOwner?.toLowerCase?.();
+      if (!owner) return;
+      const meta = tokenInfo?.[owner];
+      if (meta) byIndex[idx] = meta;
+    };
+
+    rawPathData?.transfers?.forEach((transfer, idx) => addMeta(transfer, idx));
+    pathData?.transfers?.forEach((transfer, idx) => {
+      if (!byIndex[idx]) addMeta(transfer, idx);
+    });
+
+    return byIndex;
+  }, [rawPathData, pathData, tokenInfo]);
+
+  const tokenMetaByTokenOwner = useMemo(() => {
+    const byOwner = {};
+
+    Object.entries(tokenInfo || {}).forEach(([owner, meta]) => {
+      if (!owner || !meta) return;
+      byOwner[owner.toLowerCase()] = meta;
+    });
+
+    (sourceBalances || []).forEach((row) => {
+      const owner = row?.tokenAddress?.toLowerCase?.();
+      if (!owner || byOwner[owner]) return;
+      byOwner[owner] = {
+        token: owner,
+        type: row?.tokenType,
+        tokenType: row?.tokenType,
+        isWrapped: !!(row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper')),
+        isInflationary: row?.isInflationary,
+      };
+    });
+
+    return byOwner;
+  }, [tokenInfo, sourceBalances]);
 
   // --- Route-based flow decomposition ---
   const [routes, setRoutes] = useState([]);
@@ -331,12 +705,13 @@ const FlowVisualization = () => {
   }, [pathData, routes, selectedRouteIds]);
 
   // Route selection info for left panel
-  const routeSelectionInfo = pathData && selectedRouteIds.size < routes.length ? {
+  const routeSelectionInfo = pathData && routes.length > 0 ? {
     count: selectedRouteIds.size,
     total: routes.length,
     flow: routes
       .filter(r => selectedRouteIds.has(r.id))
       .reduce((s, r) => s + r.flowNum, 0),
+    isFiltered: selectedRouteIds.size < routes.length,
   } : null;
 
   // Handle resize
@@ -347,8 +722,27 @@ const FlowVisualization = () => {
     document.body.style.userSelect = 'none';
   }, []);
 
+  const handleSourceBalancesMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isSourceBalancesDraggingRef.current = true;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
   useEffect(() => {
     const handleMouseMove = (e) => {
+      if (isSourceBalancesDraggingRef.current && transactionsContentRef.current) {
+        const contentRect = transactionsContentRef.current.getBoundingClientRect();
+        const newHeight = contentRect.bottom - e.clientY;
+        const minHeight = 120;
+        const maxHeight = contentRect.height - 160;
+
+        if (newHeight >= minHeight && newHeight <= maxHeight) {
+          setSourceBalancesHeight(newHeight);
+        }
+        return;
+      }
+
       if (!isDraggingRef.current || !containerRef.current) return;
       
       const containerRect = containerRef.current.getBoundingClientRect();
@@ -365,6 +759,7 @@ const FlowVisualization = () => {
 
     const handleMouseUp = () => {
       isDraggingRef.current = false;
+      isSourceBalancesDraggingRef.current = false;
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
@@ -376,7 +771,7 @@ const FlowVisualization = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, []);
+  }, [setSourceBalancesHeight, setTableHeight]);
 
   // Debug wrapped tokens
   useEffect(() => {
@@ -486,9 +881,12 @@ const FlowVisualization = () => {
                 visualizationMode === 'graph' ? (
                   <CytoscapeVisualization
                     ref={cytoscapeRef}
+                    rawPathData={rawPathData}
                     pathData={filteredPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
+                    tokenInfo={tokenInfo}
+                    edgeCatalogByIndex={edgeCatalogByIndex}
                     nodeProfiles={nodeProfiles}
                     tokenOwnerProfiles={tokenOwnerProfiles}
                     balancesByAccount={balancesByAccount}
@@ -594,17 +992,203 @@ const FlowVisualization = () => {
                   
                   <div className="flex-1 overflow-auto px-4 pb-4">
                     <TabsContent isActive={activeTab === 'transactions'} className="h-full overflow-hidden">
-                      <TransactionTable
-                        routes={routes}
-                        selectedRouteIds={selectedRouteIds}
-                        onToggleRoute={handleToggleRoute}
-                        onToggleAllRoutes={handleToggleAllRoutes}
-                        maxFlow={pathData.maxFlow}
-                        onTransactionSelect={handleTransactionSelect}
-                        selectedTransactionId={selectedTransactionId}
-                        nodeProfiles={nodeProfiles}
-                        showNames={showNames}
-                      />
+                      <div ref={transactionsContentRef} className="h-full flex flex-col gap-3 min-h-0">
+                        <div className="min-h-0 flex-1">
+                          <TransactionTable
+                            routes={routes}
+                            selectedRouteIds={selectedRouteIds}
+                            onToggleRoute={handleToggleRoute}
+                            onToggleAllRoutes={handleToggleAllRoutes}
+                            maxFlow={pathData.maxFlow}
+                            onTransactionSelect={handleTransactionSelect}
+                            selectedTransactionId={selectedTransactionId}
+                            nodeProfiles={nodeProfiles}
+                            tokenInfo={tokenInfo}
+                            routeTokenInfoByIndex={routeTokenInfoByIndex}
+                            tokenMetaByTokenOwner={tokenMetaByTokenOwner}
+                            showNames={showNames}
+                          />
+                        </div>
+
+                        <div
+                          className="flex items-center gap-3 px-1 py-1 cursor-ns-resize select-none"
+                          onMouseDown={handleSourceBalancesMouseDown}
+                        >
+                          <div className="h-px flex-1 bg-gray-300" />
+                          <span className="text-[10px] uppercase tracking-wider text-gray-400">Source balances</span>
+                          <GripHorizontal size={12} className="text-gray-400" />
+                          <div className="h-px flex-1 bg-gray-300" />
+                        </div>
+
+                        <div
+                          className="border rounded-lg bg-white overflow-hidden flex flex-col"
+                          style={{ height: `${sourceBalancesHeight}px` }}
+                        >
+                          <div className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 border-b flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setLowerPanelTab('source')}
+                              className={`px-2 py-1 rounded text-xs border ${
+                                lowerPanelTab === 'source'
+                                  ? 'bg-gray-900 text-white border-gray-900'
+                                  : 'bg-white text-gray-600 border-gray-300'
+                              }`}
+                            >
+                              Source balances ({sortedSourceBalances.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLowerPanelTab('sink')}
+                              className={`px-2 py-1 rounded text-xs border ${
+                                lowerPanelTab === 'sink'
+                                  ? 'bg-gray-900 text-white border-gray-900'
+                                  : 'bg-white text-gray-600 border-gray-300'
+                              }`}
+                            >
+                              Sink trust ({sinkTrustRows.length})
+                            </button>
+                          </div>
+
+                          {lowerPanelTab === 'source' ? (
+                            <div className="min-h-0 flex-1 overflow-auto">
+                              <div className="px-3 py-2 border-b bg-white sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={toggleQuickFilterEnabled}
+                                    className={`text-xs px-2 py-1 rounded border ${
+                                      quickFromFilterEnabled
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-gray-100 text-gray-700 border-gray-300'
+                                    }`}
+                                  >
+                                    Quick filter {quickFromFilterEnabled ? 'ON' : 'OFF'}
+                                  </button>
+                                  <span className="text-xs text-gray-500">
+                                    {normalizedFromTokens.length} selected
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    Σ Selected CRC: {formatBalanceNum(selectedSourceCrcSum)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <button type="button" onClick={toggleSelectAllQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Clear</button>
+                                  <button type="button" onClick={selectWrappedQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Wrapped</button>
+                                  <button type="button" onClick={selectRegular1155QuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Circles</button>
+                                  <button type="button" onClick={selectGroupQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Groups</button>
+                                  <button type="button" onClick={selectStaticQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Static</button>
+                                  <button type="button" onClick={selectDemurragedQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Demurraged</button>
+                                </div>
+                              </div>
+
+                              {sourceBalancesLoading ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">Loading source balances…</div>
+                              ) : sourceBalancesError ? (
+                                <div className="px-3 py-2 text-xs text-red-600">{sourceBalancesError}</div>
+                              ) : sortedSourceBalances.length === 0 ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">No source balances found.</div>
+                              ) : (
+                                <table className="w-full text-xs text-left">
+                                  <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
+                                    <tr>
+                                      <th className="px-3 py-2">Use</th>
+                                      <th className="px-3 py-2">Token</th>
+                                      <th className="px-3 py-2">Owner</th>
+                                      <th className="px-3 py-2 text-right"><button type="button" onClick={() => toggleSourceBalanceSort('crc')} className="inline-flex items-center gap-1 hover:text-gray-900" title="Sort by CRC">CRC <span className="text-[10px]">{sortIndicator('crc')}</span></button></th>
+                                      <th className="px-3 py-2 text-right"><button type="button" onClick={() => toggleSourceBalanceSort('staticCircles')} className="inline-flex items-center gap-1 hover:text-gray-900" title="Sort by Static CRC">Static CRC <span className="text-[10px]">{sortIndicator('staticCircles')}</span></button></th>
+                                      <th className="px-3 py-2">Label</th>
+                                      <th className="px-3 py-2">Type</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                    {sortedSourceBalances.map((row) => {
+                                      const wrapped = row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper');
+                                      const cadence = typeof row?.isInflationary === 'boolean' ? (row.isInflationary ? 'Static' : 'Demurraged') : null;
+                                      const ownerAddress = row?.tokenOwner || '';
+                                      const ownerProfile = tokenOwnerProfiles?.[ownerAddress.toLowerCase()];
+                                      const ownerDisplay = showNames ? (ownerProfile?.name || `${ownerAddress.slice(0, 6)}…${ownerAddress.slice(-4)}`) : `${ownerAddress.slice(0, 6)}…${ownerAddress.slice(-4)}`;
+
+                                      return (
+                                        <tr key={`${row.tokenAddress}-${row.tokenOwner}`} className="hover:bg-gray-50">
+                                          <td className="px-3 py-2"><input type="checkbox" checked={isQuickTokenSelected(row.tokenAddress)} onChange={() => toggleQuickToken(row.tokenAddress)} className="rounded border-gray-300" title="Include this source token in quick fromTokens filter" /></td>
+                                          <td className="px-3 py-2 font-mono text-[11px] text-gray-700">{row.tokenAddress?.slice(0, 6)}…{row.tokenAddress?.slice(-4)}</td>
+                                          <td className={`px-3 py-2 text-[11px] text-gray-600 ${showNames ? '' : 'font-mono'}`}>{ownerDisplay}</td>
+                                          <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.circles)}</td>
+                                          <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.staticCircles)}</td>
+                                          <td className="px-3 py-2">
+                                            <div className="flex items-center gap-1.5">
+                                              {wrapped && cadence && (<span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">{cadence}</span>)}
+                                            </div>
+                                          </td>
+                                          <td className="px-3 py-2 text-gray-500">{row.tokenType || '—'}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="min-h-0 flex-1 overflow-auto">
+                              <div className="px-3 py-2 border-b bg-white sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={toggleQuickToFilterEnabled}
+                                    className={`text-xs px-2 py-1 rounded border ${
+                                      quickToFilterEnabled
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-gray-100 text-gray-700 border-gray-300'
+                                    }`}
+                                  >
+                                    Quick filter {quickToFilterEnabled ? 'ON' : 'OFF'}
+                                  </button>
+                                  <span className="text-xs text-gray-500">{normalizedToTokens.length} selected</span>
+                                </div>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <button type="button" onClick={toggleSelectAllSinkQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Clear</button>
+                                </div>
+                              </div>
+
+                              {sinkTrustLoading ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">Loading sink trust…</div>
+                              ) : sinkTrustError ? (
+                                <div className="px-3 py-2 text-xs text-red-600">{sinkTrustError}</div>
+                              ) : sinkTrustRows.length === 0 ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">No sink trust avatars found.</div>
+                              ) : (
+                                <table className="w-full text-xs text-left">
+                                  <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
+                                    <tr>
+                                      <th className="px-3 py-2">Use</th>
+                                      <th className="px-3 py-2">Avatar</th>
+                                      <th className="px-3 py-2">Trusted</th>
+                                      <th className="px-3 py-2 text-right">Relation</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                    {sinkTrustRows.map((row) => {
+                                      const avatarAddress = row?.tokenAddress || '';
+                                      const profile = tokenOwnerProfiles?.[avatarAddress.toLowerCase()];
+                                      const avatarDisplay = showNames
+                                        ? (profile?.name || `${avatarAddress.slice(0, 6)}…${avatarAddress.slice(-4)}`)
+                                        : `${avatarAddress.slice(0, 6)}…${avatarAddress.slice(-4)}`;
+                                      return (
+                                        <tr key={avatarAddress} className="hover:bg-gray-50">
+                                          <td className="px-3 py-2"><input type="checkbox" checked={isQuickSinkTokenSelected(avatarAddress)} onChange={() => toggleQuickSinkToken(avatarAddress)} className="rounded border-gray-300" title="Include this sink-trusted avatar in quick toTokens filter" /></td>
+                                          <td className="px-3 py-2 font-mono text-[11px] text-gray-700">{avatarAddress.slice(0, 6)}…{avatarAddress.slice(-4)}</td>
+                                          <td className={`px-3 py-2 text-[11px] text-gray-600 ${showNames ? '' : 'font-mono'}`}>{avatarDisplay}</td>
+                                          <td className="px-3 py-2 text-right text-gray-700">{row.relation || 'trusts'}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </TabsContent>
                     
                     <TabsContent isActive={activeTab === 'parameters'} className="h-full">
