@@ -1024,29 +1024,23 @@ const FlowVisualization = () => {
                           className="border rounded-lg bg-white overflow-hidden flex flex-col"
                           style={{ height: `${sourceBalancesHeight}px` }}
                         >
-                          <div className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 border-b flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setLowerPanelTab('source')}
-                              className={`px-2 py-1 rounded text-xs border ${
-                                lowerPanelTab === 'source'
-                                  ? 'bg-gray-900 text-white border-gray-900'
-                                  : 'bg-white text-gray-600 border-gray-300'
-                              }`}
-                            >
-                              Source balances ({sortedSourceBalances.length})
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setLowerPanelTab('sink')}
-                              className={`px-2 py-1 rounded text-xs border ${
-                                lowerPanelTab === 'sink'
-                                  ? 'bg-gray-900 text-white border-gray-900'
-                                  : 'bg-white text-gray-600 border-gray-300'
-                              }`}
-                            >
-                              Sink trust ({sinkTrustRows.length})
-                            </button>
+                          <div className="px-3 pt-2 bg-gray-50 border-b">
+                            <TabsList className="mb-2">
+                              <TabsTrigger
+                                isActive={lowerPanelTab === 'source'}
+                                onClick={() => setLowerPanelTab('source')}
+                                className="text-xs"
+                              >
+                                Source balances ({sortedSourceBalances.length})
+                              </TabsTrigger>
+                              <TabsTrigger
+                                isActive={lowerPanelTab === 'sink'}
+                                onClick={() => setLowerPanelTab('sink')}
+                                className="text-xs"
+                              >
+                                Sink trust ({sinkTrustRows.length})
+                              </TabsTrigger>
+                            </TabsList>
                           </div>
 
                           {lowerPanelTab === 'source' ? (
