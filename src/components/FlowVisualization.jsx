@@ -24,16 +24,21 @@ const FlowVisualization = () => {
   const [activeTab, setActiveTab] = usePersistedState('active-tab', 'transactions');
   const [showPerformanceWarning, setShowPerformanceWarning] = useState(false);
   const [tableHeight, setTableHeight] = usePersistedState('table-height', 320);
+  const [sourceBalancesHeight, setSourceBalancesHeight] = usePersistedState('source-balances-height', 260);
   const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
   const [showNames, setShowNames] = usePersistedState('show-names', true);
   const [quickFromFilterEnabled, setQuickFromFilterEnabled] = usePersistedState('quick-from-filter-enabled', false);
+  const [quickToFilterEnabled, setQuickToFilterEnabled] = usePersistedState('quick-to-filter-enabled', false);
   const [sourceBalanceSort, setSourceBalanceSort] = usePersistedState('source-balance-sort', { key: 'crc', direction: 'desc' });
+  const [lowerPanelTab, setLowerPanelTab] = usePersistedState('lower-panel-tab', 'source');
   // selectedTransfers removed — route-based selection via selectedRouteIds
   const cytoscapeRef = useRef(null);
   const sankeyRef = useRef(null);
   const autoSimplifiedRef = useRef(false);
   const containerRef = useRef(null);
   const isDraggingRef = useRef(false);
+  const transactionsContentRef = useRef(null);
+  const isSourceBalancesDraggingRef = useRef(false);
   
   const { shouldAutoSimplify, setPreset, toggleFeature, config } = usePerformance();
   
@@ -46,6 +51,7 @@ const FlowVisualization = () => {
     handleFromTokensExclusionToggle,
     handleToTokensExclusionToggle,
     setFromTokensIncludeValue,
+    setToTokensIncludeValue,
   } = useFormData();
   
   const {
@@ -60,12 +66,16 @@ const FlowVisualization = () => {
     error,
     wrappedTokens,
     tokenInfo,
+    edgeCatalogByIndex,
     tokenOwnerProfiles,
     nodeProfiles,
     balancesByAccount,
     sourceBalances,
     sourceBalancesLoading,
     sourceBalancesError,
+    sinkTrustRows,
+    sinkTrustLoading,
+    sinkTrustError,
     minCapacity,
     setMinCapacity,
     maxCapacity,
@@ -74,7 +84,7 @@ const FlowVisualization = () => {
     setBoundMin,
     boundMax,
     setBoundMax
-  } = usePathData();
+  } = usePathData(formData.To);
   
   // Helper function to get Cytoscape instance
   const getCyInstance = useCallback(() => {
@@ -276,6 +286,47 @@ const FlowVisualization = () => {
     return parseAddressList(formData.FromTokens).map(a => a.toLowerCase());
   }, [formData.FromTokens, formData.IsFromTokensExcluded]);
 
+  const normalizedToTokens = useMemo(() => {
+    if (formData.IsToTokensExcluded) return [];
+    return parseAddressList(formData.ToTokens).map(a => a.toLowerCase());
+  }, [formData.ToTokens, formData.IsToTokensExcluded]);
+
+  const selectedSourceCrcSum = useMemo(() => {
+    if (!Array.isArray(sourceBalances) || normalizedFromTokens.length === 0) return 0;
+
+    return sourceBalances.reduce((sum, row) => {
+      const tokenAddress = row?.tokenAddress?.toLowerCase();
+      if (!tokenAddress || !normalizedFromTokens.includes(tokenAddress)) return sum;
+
+      const crc = Number(row?.circles ?? row?.crc ?? 0);
+      return Number.isFinite(crc) ? sum + crc : sum;
+    }, 0);
+  }, [sourceBalances, normalizedFromTokens]);
+
+
+  const isWrappedSourceBalance = useCallback((row) => (
+    !!(row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper'))
+  ), []);
+
+  const isStaticSourceBalance = useCallback((row) => (
+    isWrappedSourceBalance(row) && row?.isInflationary === true
+  ), [isWrappedSourceBalance]);
+
+  const isDemurragedWrappedSourceBalance = useCallback((row) => (
+    isWrappedSourceBalance(row) && row?.isInflationary !== true
+  ), [isWrappedSourceBalance]);
+
+  const isRegular1155SourceBalance = useCallback((row) => (
+    !isWrappedSourceBalance(row)
+  ), [isWrappedSourceBalance]);
+
+  const isGroupSourceBalance = useCallback((row) => {
+    const tokenType = typeof row?.tokenType === 'string' ? row.tokenType.toLowerCase() : '';
+    const wrappedTokenType = typeof row?.wrappedTokenType === 'string' ? row.wrappedTokenType.toLowerCase() : '';
+
+    return tokenType.includes('group') || wrappedTokenType.includes('group');
+  }, []);
+
   const executeFindPath = useCallback(async (requestData) => {
     autoSimplifiedRef.current = false;
     setSelectedTransactionId(null);
@@ -283,6 +334,68 @@ const FlowVisualization = () => {
 
     await loadPathData(requestData);
   }, [loadPathData, clearHighlights]);
+
+  const selectQuickTokensByPredicate = useCallback(async (predicate) => {
+    const nextTokens = Array.from(new Set(
+      (sourceBalances || [])
+        .filter(predicate)
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const nextFromTokens = nextTokens.join(',');
+
+    setFromTokensIncludeValue(nextFromTokens);
+
+    if (quickFromFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        FromTokens: nextFromTokens,
+        ExcludedFromTokens: '',
+        IsFromTokensExcluded: false,
+      });
+    }
+  }, [sourceBalances, setFromTokensIncludeValue, quickFromFilterEnabled, executeFindPath, formData]);
+
+  const selectAllQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(() => true);
+  }, [selectQuickTokensByPredicate]);
+
+  const toggleSelectAllQuickTokens = useCallback(async () => {
+    const allTokenAddresses = Array.from(new Set(
+      (sourceBalances || [])
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const allSelected = allTokenAddresses.length > 0
+      && allTokenAddresses.every((token) => normalizedFromTokens.includes(token));
+
+    if (allSelected) {
+      await selectQuickTokensByPredicate(() => false);
+      return;
+    }
+
+    await selectAllQuickTokens();
+  }, [sourceBalances, normalizedFromTokens, selectQuickTokensByPredicate, selectAllQuickTokens]);
+
+  const selectWrappedQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isWrappedSourceBalance);
+  }, [selectQuickTokensByPredicate, isWrappedSourceBalance]);
+
+  const selectStaticQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isStaticSourceBalance);
+  }, [selectQuickTokensByPredicate, isStaticSourceBalance]);
+
+  const selectDemurragedQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isDemurragedWrappedSourceBalance);
+  }, [selectQuickTokensByPredicate, isDemurragedWrappedSourceBalance]);
+
+  const selectRegular1155QuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isRegular1155SourceBalance);
+  }, [selectQuickTokensByPredicate, isRegular1155SourceBalance]);
+
+  const selectGroupQuickTokens = useCallback(async () => {
+    await selectQuickTokensByPredicate(isGroupSourceBalance);
+  }, [selectQuickTokensByPredicate, isGroupSourceBalance]);
 
   const handleFindPath = useCallback(async (overrideFormData) => {
     const baseData = overrideFormData || formData;
@@ -329,6 +442,83 @@ const FlowVisualization = () => {
   }, [
     quickFromFilterEnabled,
     setQuickFromFilterEnabled,
+    executeFindPath,
+    formData,
+  ]);
+
+  const isQuickSinkTokenSelected = useCallback((tokenAddress) => {
+    if (!tokenAddress) return false;
+    return normalizedToTokens.includes(tokenAddress.toLowerCase());
+  }, [normalizedToTokens]);
+
+  const selectSinkQuickTokensByPredicate = useCallback(async (predicate) => {
+    const nextTokens = Array.from(new Set(
+      sinkTrustRows
+        .filter(predicate)
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const nextToTokens = nextTokens.join(',');
+
+    setToTokensIncludeValue(nextToTokens);
+
+    if (quickToFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        ToTokens: nextToTokens,
+        ExcludedToTokens: '',
+        IsToTokensExcluded: false,
+      });
+    }
+  }, [sinkTrustRows, setToTokensIncludeValue, quickToFilterEnabled, executeFindPath, formData]);
+
+  const toggleSelectAllSinkQuickTokens = useCallback(async () => {
+    const allTokenAddresses = Array.from(new Set(
+      sinkTrustRows
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const allSelected = allTokenAddresses.length > 0
+      && allTokenAddresses.every((token) => normalizedToTokens.includes(token));
+
+    await selectSinkQuickTokensByPredicate(allSelected ? () => false : () => true);
+  }, [sinkTrustRows, normalizedToTokens, selectSinkQuickTokensByPredicate]);
+
+  const toggleQuickSinkToken = useCallback(async (tokenAddress) => {
+    if (!tokenAddress) return;
+    const normalized = tokenAddress.toLowerCase();
+    const nextTokens = normalizedToTokens.includes(normalized)
+      ? normalizedToTokens.filter(t => t !== normalized)
+      : [...normalizedToTokens, normalized];
+    const nextToTokens = nextTokens.join(',');
+
+    setToTokensIncludeValue(nextToTokens);
+
+    if (quickToFilterEnabled) {
+      await executeFindPath({
+        ...formData,
+        ToTokens: nextToTokens,
+        ExcludedToTokens: '',
+        IsToTokensExcluded: false,
+      });
+    }
+  }, [
+    normalizedToTokens,
+    setToTokensIncludeValue,
+    quickToFilterEnabled,
+    executeFindPath,
+    formData,
+  ]);
+
+  const toggleQuickToFilterEnabled = useCallback(async () => {
+    const nextEnabled = !quickToFilterEnabled;
+    setQuickToFilterEnabled(nextEnabled);
+    if (nextEnabled) {
+      await executeFindPath(formData);
+    }
+  }, [
+    quickToFilterEnabled,
+    setQuickToFilterEnabled,
     executeFindPath,
     formData,
   ]);
@@ -532,8 +722,27 @@ const FlowVisualization = () => {
     document.body.style.userSelect = 'none';
   }, []);
 
+  const handleSourceBalancesMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isSourceBalancesDraggingRef.current = true;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
   useEffect(() => {
     const handleMouseMove = (e) => {
+      if (isSourceBalancesDraggingRef.current && transactionsContentRef.current) {
+        const contentRect = transactionsContentRef.current.getBoundingClientRect();
+        const newHeight = contentRect.bottom - e.clientY;
+        const minHeight = 120;
+        const maxHeight = contentRect.height - 160;
+
+        if (newHeight >= minHeight && newHeight <= maxHeight) {
+          setSourceBalancesHeight(newHeight);
+        }
+        return;
+      }
+
       if (!isDraggingRef.current || !containerRef.current) return;
       
       const containerRect = containerRef.current.getBoundingClientRect();
@@ -550,6 +759,7 @@ const FlowVisualization = () => {
 
     const handleMouseUp = () => {
       isDraggingRef.current = false;
+      isSourceBalancesDraggingRef.current = false;
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
@@ -561,7 +771,7 @@ const FlowVisualization = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, []);
+  }, [setSourceBalancesHeight, setTableHeight]);
 
   // Debug wrapped tokens
   useEffect(() => {
@@ -671,9 +881,12 @@ const FlowVisualization = () => {
                 visualizationMode === 'graph' ? (
                   <CytoscapeVisualization
                     ref={cytoscapeRef}
+                    rawPathData={rawPathData}
                     pathData={filteredPathData || pathData}
                     formData={formData}
                     wrappedTokens={wrappedTokens}
+                    tokenInfo={tokenInfo}
+                    edgeCatalogByIndex={edgeCatalogByIndex}
                     nodeProfiles={nodeProfiles}
                     tokenOwnerProfiles={tokenOwnerProfiles}
                     balancesByAccount={balancesByAccount}
@@ -779,7 +992,7 @@ const FlowVisualization = () => {
                   
                   <div className="flex-1 overflow-auto px-4 pb-4">
                     <TabsContent isActive={activeTab === 'transactions'} className="h-full overflow-hidden">
-                      <div className="h-full flex flex-col gap-3">
+                      <div ref={transactionsContentRef} className="h-full flex flex-col gap-3 min-h-0">
                         <div className="min-h-0 flex-1">
                           <TransactionTable
                             routes={routes}
@@ -797,120 +1010,184 @@ const FlowVisualization = () => {
                           />
                         </div>
 
-                        <details className="border rounded-lg bg-white overflow-hidden">
-                          <summary className="px-3 py-2 cursor-pointer text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100">
-                            Source balances ({sortedSourceBalances.length})
-                          </summary>
+                        <div
+                          className="flex items-center gap-3 px-1 py-1 cursor-ns-resize select-none"
+                          onMouseDown={handleSourceBalancesMouseDown}
+                        >
+                          <div className="h-px flex-1 bg-gray-300" />
+                          <span className="text-[10px] uppercase tracking-wider text-gray-400">Source balances</span>
+                          <GripHorizontal size={12} className="text-gray-400" />
+                          <div className="h-px flex-1 bg-gray-300" />
+                        </div>
 
-                          <div className="max-h-56 overflow-auto">
-                            <div className="px-3 py-2 border-b bg-white sticky top-0 z-20 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={toggleQuickFilterEnabled}
-                                  className={`text-xs px-2 py-1 rounded border ${
-                                    quickFromFilterEnabled
-                                      ? 'bg-blue-600 text-white border-blue-600'
-                                      : 'bg-gray-100 text-gray-700 border-gray-300'
-                                  }`}
-                                >
-                                  Quick filter {quickFromFilterEnabled ? 'ON' : 'OFF'}
-                                </button>
-                                <span className="text-xs text-gray-500">
-                                  {normalizedFromTokens.length} selected
-                                </span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={clearQuickFilterSelection}
-                                disabled={normalizedFromTokens.length === 0}
-                                className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300 disabled:opacity-50"
-                              >
-                                Clear
-                              </button>
-                            </div>
-
-                            {sourceBalancesLoading ? (
-                              <div className="px-3 py-2 text-xs text-gray-500">Loading source balances…</div>
-                            ) : sourceBalancesError ? (
-                              <div className="px-3 py-2 text-xs text-red-600">{sourceBalancesError}</div>
-                            ) : sortedSourceBalances.length === 0 ? (
-                              <div className="px-3 py-2 text-xs text-gray-500">No source balances found.</div>
-                            ) : (
-                              <table className="w-full text-xs text-left">
-                                <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
-                                  <tr>
-                                    <th className="px-3 py-2">Use</th>
-                                    <th className="px-3 py-2">Token</th>
-                                    <th className="px-3 py-2">Owner</th>
-                                    <th className="px-3 py-2 text-right">
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleSourceBalanceSort('crc')}
-                                        className="inline-flex items-center gap-1 hover:text-gray-900"
-                                        title="Sort by CRC"
-                                      >
-                                        CRC <span className="text-[10px]">{sortIndicator('crc')}</span>
-                                      </button>
-                                    </th>
-                                    <th className="px-3 py-2 text-right">
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleSourceBalanceSort('staticCircles')}
-                                        className="inline-flex items-center gap-1 hover:text-gray-900"
-                                        title="Sort by Static CRC"
-                                      >
-                                        Static CRC <span className="text-[10px]">{sortIndicator('staticCircles')}</span>
-                                      </button>
-                                    </th>
-                                    <th className="px-3 py-2">Label</th>
-                                    <th className="px-3 py-2">Type</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                  {sortedSourceBalances.map((row) => {
-                                    const wrapped = row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper');
-                                    const cadence = typeof row?.isInflationary === 'boolean'
-                                      ? (row.isInflationary ? 'Static' : 'Demurraged')
-                                      : null;
-
-                                    return (
-                                      <tr key={`${row.tokenAddress}-${row.tokenOwner}`} className="hover:bg-gray-50">
-                                        <td className="px-3 py-2">
-                                          <input
-                                            type="checkbox"
-                                            checked={isQuickTokenSelected(row.tokenAddress)}
-                                            onChange={() => toggleQuickToken(row.tokenAddress)}
-                                            className="rounded border-gray-300"
-                                            title="Include this source token in quick fromTokens filter"
-                                          />
-                                        </td>
-                                        <td className="px-3 py-2 font-mono text-[11px] text-gray-700">
-                                          {row.tokenAddress?.slice(0, 6)}…{row.tokenAddress?.slice(-4)}
-                                        </td>
-                                        <td className="px-3 py-2 font-mono text-[11px] text-gray-600">
-                                          {row.tokenOwner?.slice(0, 6)}…{row.tokenOwner?.slice(-4)}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.crc)}</td>
-                                        <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.staticCircles)}</td>
-                                        <td className="px-3 py-2">
-                                          <div className="flex items-center gap-1.5">
-                                            {wrapped && cadence && (
-                                              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                                {cadence}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-500">{row.tokenType || '—'}</td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            )}
+                        <div
+                          className="border rounded-lg bg-white overflow-hidden flex flex-col"
+                          style={{ height: `${sourceBalancesHeight}px` }}
+                        >
+                          <div className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 border-b flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setLowerPanelTab('source')}
+                              className={`px-2 py-1 rounded text-xs border ${
+                                lowerPanelTab === 'source'
+                                  ? 'bg-gray-900 text-white border-gray-900'
+                                  : 'bg-white text-gray-600 border-gray-300'
+                              }`}
+                            >
+                              Source balances ({sortedSourceBalances.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLowerPanelTab('sink')}
+                              className={`px-2 py-1 rounded text-xs border ${
+                                lowerPanelTab === 'sink'
+                                  ? 'bg-gray-900 text-white border-gray-900'
+                                  : 'bg-white text-gray-600 border-gray-300'
+                              }`}
+                            >
+                              Sink trust ({sinkTrustRows.length})
+                            </button>
                           </div>
-                        </details>
+
+                          {lowerPanelTab === 'source' ? (
+                            <div className="min-h-0 flex-1 overflow-auto">
+                              <div className="px-3 py-2 border-b bg-white sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={toggleQuickFilterEnabled}
+                                    className={`text-xs px-2 py-1 rounded border ${
+                                      quickFromFilterEnabled
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-gray-100 text-gray-700 border-gray-300'
+                                    }`}
+                                  >
+                                    Quick filter {quickFromFilterEnabled ? 'ON' : 'OFF'}
+                                  </button>
+                                  <span className="text-xs text-gray-500">
+                                    {normalizedFromTokens.length} selected
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    Σ Selected CRC: {formatBalanceNum(selectedSourceCrcSum)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <button type="button" onClick={toggleSelectAllQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Clear</button>
+                                  <button type="button" onClick={selectWrappedQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Wrapped</button>
+                                  <button type="button" onClick={selectRegular1155QuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Circles</button>
+                                  <button type="button" onClick={selectGroupQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Groups</button>
+                                  <button type="button" onClick={selectStaticQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Static</button>
+                                  <button type="button" onClick={selectDemurragedQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Demurraged</button>
+                                </div>
+                              </div>
+
+                              {sourceBalancesLoading ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">Loading source balances…</div>
+                              ) : sourceBalancesError ? (
+                                <div className="px-3 py-2 text-xs text-red-600">{sourceBalancesError}</div>
+                              ) : sortedSourceBalances.length === 0 ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">No source balances found.</div>
+                              ) : (
+                                <table className="w-full text-xs text-left">
+                                  <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
+                                    <tr>
+                                      <th className="px-3 py-2">Use</th>
+                                      <th className="px-3 py-2">Token</th>
+                                      <th className="px-3 py-2">Owner</th>
+                                      <th className="px-3 py-2 text-right"><button type="button" onClick={() => toggleSourceBalanceSort('crc')} className="inline-flex items-center gap-1 hover:text-gray-900" title="Sort by CRC">CRC <span className="text-[10px]">{sortIndicator('crc')}</span></button></th>
+                                      <th className="px-3 py-2 text-right"><button type="button" onClick={() => toggleSourceBalanceSort('staticCircles')} className="inline-flex items-center gap-1 hover:text-gray-900" title="Sort by Static CRC">Static CRC <span className="text-[10px]">{sortIndicator('staticCircles')}</span></button></th>
+                                      <th className="px-3 py-2">Label</th>
+                                      <th className="px-3 py-2">Type</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                    {sortedSourceBalances.map((row) => {
+                                      const wrapped = row?.isWrapped || row?.tokenType?.includes('ERC20Wrapper');
+                                      const cadence = typeof row?.isInflationary === 'boolean' ? (row.isInflationary ? 'Static' : 'Demurraged') : null;
+                                      const ownerAddress = row?.tokenOwner || '';
+                                      const ownerProfile = tokenOwnerProfiles?.[ownerAddress.toLowerCase()];
+                                      const ownerDisplay = showNames ? (ownerProfile?.name || `${ownerAddress.slice(0, 6)}…${ownerAddress.slice(-4)}`) : `${ownerAddress.slice(0, 6)}…${ownerAddress.slice(-4)}`;
+
+                                      return (
+                                        <tr key={`${row.tokenAddress}-${row.tokenOwner}`} className="hover:bg-gray-50">
+                                          <td className="px-3 py-2"><input type="checkbox" checked={isQuickTokenSelected(row.tokenAddress)} onChange={() => toggleQuickToken(row.tokenAddress)} className="rounded border-gray-300" title="Include this source token in quick fromTokens filter" /></td>
+                                          <td className="px-3 py-2 font-mono text-[11px] text-gray-700">{row.tokenAddress?.slice(0, 6)}…{row.tokenAddress?.slice(-4)}</td>
+                                          <td className={`px-3 py-2 text-[11px] text-gray-600 ${showNames ? '' : 'font-mono'}`}>{ownerDisplay}</td>
+                                          <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.circles)}</td>
+                                          <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.staticCircles)}</td>
+                                          <td className="px-3 py-2">
+                                            <div className="flex items-center gap-1.5">
+                                              {wrapped && cadence && (<span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-indigo-100 text-indigo-800 border border-indigo-200">{cadence}</span>)}
+                                            </div>
+                                          </td>
+                                          <td className="px-3 py-2 text-gray-500">{row.tokenType || '—'}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="min-h-0 flex-1 overflow-auto">
+                              <div className="px-3 py-2 border-b bg-white sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={toggleQuickToFilterEnabled}
+                                    className={`text-xs px-2 py-1 rounded border ${
+                                      quickToFilterEnabled
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-gray-100 text-gray-700 border-gray-300'
+                                    }`}
+                                  >
+                                    Quick filter {quickToFilterEnabled ? 'ON' : 'OFF'}
+                                  </button>
+                                  <span className="text-xs text-gray-500">{normalizedToTokens.length} selected</span>
+                                </div>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <button type="button" onClick={toggleSelectAllSinkQuickTokens} className="text-xs px-2 py-1 rounded border bg-white text-gray-600 border-gray-300">Clear</button>
+                                </div>
+                              </div>
+
+                              {sinkTrustLoading ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">Loading sink trust…</div>
+                              ) : sinkTrustError ? (
+                                <div className="px-3 py-2 text-xs text-red-600">{sinkTrustError}</div>
+                              ) : sinkTrustRows.length === 0 ? (
+                                <div className="px-3 py-2 text-xs text-gray-500">No sink trust avatars found.</div>
+                              ) : (
+                                <table className="w-full text-xs text-left">
+                                  <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
+                                    <tr>
+                                      <th className="px-3 py-2">Use</th>
+                                      <th className="px-3 py-2">Avatar</th>
+                                      <th className="px-3 py-2">Trusted</th>
+                                      <th className="px-3 py-2 text-right">Relation</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                    {sinkTrustRows.map((row) => {
+                                      const avatarAddress = row?.tokenAddress || '';
+                                      const profile = tokenOwnerProfiles?.[avatarAddress.toLowerCase()];
+                                      const avatarDisplay = showNames
+                                        ? (profile?.name || `${avatarAddress.slice(0, 6)}…${avatarAddress.slice(-4)}`)
+                                        : `${avatarAddress.slice(0, 6)}…${avatarAddress.slice(-4)}`;
+                                      return (
+                                        <tr key={avatarAddress} className="hover:bg-gray-50">
+                                          <td className="px-3 py-2"><input type="checkbox" checked={isQuickSinkTokenSelected(avatarAddress)} onChange={() => toggleQuickSinkToken(avatarAddress)} className="rounded border-gray-300" title="Include this sink-trusted avatar in quick toTokens filter" /></td>
+                                          <td className="px-3 py-2 font-mono text-[11px] text-gray-700">{avatarAddress.slice(0, 6)}…{avatarAddress.slice(-4)}</td>
+                                          <td className={`px-3 py-2 text-[11px] text-gray-600 ${showNames ? '' : 'font-mono'}`}>{avatarDisplay}</td>
+                                          <td className="px-3 py-2 text-right text-gray-700">{row.relation || 'trusts'}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </TabsContent>
                     

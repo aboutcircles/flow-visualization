@@ -196,6 +196,14 @@ export const useFormData = () => {
     }));
   }, []);
 
+  const setToTokensIncludeValue = useCallback((value) => {
+    setFormData(prev => ({
+      ...prev,
+      ToTokens: value,
+      IsToTokensExcluded: false,
+    }));
+  }, []);
+
   return {
     formData,
     formErrors,
@@ -208,5 +216,6 @@ export const useFormData = () => {
     handleToTokensExclusionToggle,
     applyFormUpdates,
     setFromTokensIncludeValue,
+    setToTokensIncludeValue,
   };
 };

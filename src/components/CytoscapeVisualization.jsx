@@ -13,9 +13,12 @@ import {
 } from 'lucide-react';
 
 const CytoscapeVisualization = forwardRef(({
+  rawPathData,
   pathData,
   formData,
   wrappedTokens,
+  tokenInfo,
+  edgeCatalogByIndex,
   nodeProfiles,
   tokenOwnerProfiles,
   balancesByAccount,
@@ -44,9 +47,12 @@ const CytoscapeVisualization = forwardRef(({
     highlightPath: cytoscapeHighlightPath
   } = useCytoscape({
     containerRef,
+    rawPathData,
     pathData,
     formData,
     wrappedTokens,
+    tokenInfo,
+    edgeCatalogByIndex,
     nodeProfiles,
     tokenOwnerProfiles,
     balancesByAccount,
