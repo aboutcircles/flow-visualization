@@ -37,6 +37,36 @@ const DEFAULTS = {
   MaxTransfers: '10',
   IsFromTokensExcluded: false,
   IsToTokensExcluded: false,
+  QuantizedMode: false,
+  DebugShowIntermediateSteps: false,
+  SimulatedBalances: '[]',
+  SimulatedTrusts: '[]',
+  SimulatedConsentedAvatars: '',
+};
+
+const isAddress = (value) => typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value.trim());
+
+const parseTokenSet = (value) => new Set(
+  (value || '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+const hasDuplicates = (values) => {
+  const normalized = values
+    .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+    .filter(Boolean);
+  return new Set(normalized).size !== normalized.length;
+};
+
+const parseJsonArray = (value) => {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 };
 
 export const useFormData = () => {
@@ -176,6 +206,122 @@ export const useFormData = () => {
     }));
   };
 
+  const handleQuantizedModeToggle = () => {
+    setFormData(prev => ({
+      ...prev,
+      QuantizedMode: !prev.QuantizedMode
+    }));
+  };
+
+  const handleDebugIntermediateToggle = () => {
+    setFormData(prev => ({
+      ...prev,
+      DebugShowIntermediateSteps: !prev.DebugShowIntermediateSteps
+    }));
+  };
+
+  const validateFormData = useCallback((candidateFormData) => {
+    const nextErrors = {};
+    const nextWarnings = [];
+
+    if (!isAddress(candidateFormData?.From)) nextErrors.From = 'Source must be a valid 0x address';
+    if (!isAddress(candidateFormData?.To)) nextErrors.To = 'Sink must be a valid 0x address';
+
+    try {
+      const target = BigInt(candidateFormData?.Amount || '0');
+      if (target <= 0n) nextErrors.Amount = 'Target flow must be greater than 0';
+    } catch {
+      nextErrors.Amount = 'Target flow must be a valid uint value';
+    }
+
+    const simulatedBalances = parseJsonArray(candidateFormData?.SimulatedBalances);
+    if (!simulatedBalances) {
+      nextErrors.SimulatedBalances = 'Simulated balances must be a valid JSON array';
+    } else {
+      if (simulatedBalances.length > 200) {
+        nextErrors.SimulatedBalances = 'Too many simulated balances (max 200).';
+      } else {
+        const hasInvalidBalanceRow = simulatedBalances.some((entry) => {
+          const holderOk = isAddress(entry?.holder);
+          const tokenOk = isAddress(entry?.token);
+          let amountOk = false;
+          try {
+            const value = BigInt(entry?.amount ?? '');
+            amountOk = value >= 0n;
+          } catch {
+            amountOk = false;
+          }
+          return !(holderOk && tokenOk && amountOk);
+        });
+        if (hasInvalidBalanceRow) {
+          nextErrors.SimulatedBalances = 'Each simulated balance must include valid holder, token, and uint amount.';
+        } else if (hasDuplicates(simulatedBalances.map((entry) => `${entry?.holder}|${entry?.token}|${entry?.amount}|${entry?.isWrapped}|${entry?.isStatic}`))) {
+          nextWarnings.push('Simulated balances contain duplicate rows. Duplicates will be ignored by pathfinder semantics in most cases.');
+        }
+      }
+    }
+
+    const simulatedTrusts = parseJsonArray(candidateFormData?.SimulatedTrusts);
+    if (!simulatedTrusts) {
+      nextErrors.SimulatedTrusts = 'Simulated trusts must be a valid JSON array';
+    } else {
+      if (simulatedTrusts.length > 200) {
+        nextErrors.SimulatedTrusts = 'Too many simulated trusts (max 200).';
+      } else {
+        const hasInvalidTrustRow = simulatedTrusts.some((entry) => (
+          !isAddress(entry?.truster) || !isAddress(entry?.trustee)
+        ));
+        if (hasInvalidTrustRow) {
+          nextErrors.SimulatedTrusts = 'Each simulated trust must include valid truster and trustee addresses.';
+        } else if (hasDuplicates(simulatedTrusts.map((entry) => `${entry?.truster}|${entry?.trustee}`))) {
+          nextWarnings.push('Simulated trusts contain duplicate edges. Consider deduplicating for clearer results.');
+        }
+      }
+    }
+
+    const consentedAvatars = (candidateFormData?.SimulatedConsentedAvatars || '')
+      .split(/[\s,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (consentedAvatars.length > 200) {
+      nextErrors.SimulatedConsentedAvatars = 'Too many consented avatars (max 200).';
+    } else if (consentedAvatars.some((value) => !isAddress(value))) {
+      nextErrors.SimulatedConsentedAvatars = 'Consented avatars must be valid 0x addresses.';
+    } else if (hasDuplicates(consentedAvatars)) {
+      nextWarnings.push('Simulated consented avatars contain duplicates.');
+    }
+
+    const includeFromTokens = parseTokenSet(candidateFormData?.FromTokens);
+    const excludeFromTokens = parseTokenSet(candidateFormData?.ExcludedFromTokens);
+    const includeToTokens = parseTokenSet(candidateFormData?.ToTokens);
+    const excludeToTokens = parseTokenSet(candidateFormData?.ExcludedToTokens);
+
+    const fromConflict = [...includeFromTokens].some((token) => excludeFromTokens.has(token));
+    const toConflict = [...includeToTokens].some((token) => excludeToTokens.has(token));
+
+    if (fromConflict) nextWarnings.push('Some source tokens appear in both include and exclude lists.');
+    if (toConflict) nextWarnings.push('Some sink tokens appear in both include and exclude lists.');
+    if (hasDuplicates((candidateFormData?.FromTokens || '').split(','))) {
+      nextWarnings.push('Source token allowlist contains duplicates.');
+    }
+    if (hasDuplicates((candidateFormData?.ExcludedFromTokens || '').split(','))) {
+      nextWarnings.push('Source token exclusion list contains duplicates.');
+    }
+    if (hasDuplicates((candidateFormData?.ToTokens || '').split(','))) {
+      nextWarnings.push('Sink token allowlist contains duplicates.');
+    }
+    if (hasDuplicates((candidateFormData?.ExcludedToTokens || '').split(','))) {
+      nextWarnings.push('Sink token exclusion list contains duplicates.');
+    }
+
+    setFormErrors(nextErrors);
+    return {
+      isValid: Object.keys(nextErrors).length === 0,
+      warnings: nextWarnings,
+      errors: nextErrors,
+    };
+  }, []);
+
   const applyFormUpdates = useCallback((updatesOrUpdater) => {
     setFormData(prev => {
       if (typeof updatesOrUpdater === 'function') {
@@ -212,10 +358,13 @@ export const useFormData = () => {
     handleTokensChange,
     handleWithWrapToggle,
     handleStagingToggle,
+    handleQuantizedModeToggle,
+    handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,
     handleToTokensExclusionToggle,
     applyFormUpdates,
     setFromTokensIncludeValue,
     setToTokensIncludeValue,
+    validateFormData,
   };
 };

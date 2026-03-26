@@ -10,10 +10,14 @@ const CollapsibleLeftPanel = ({
   isCollapsed,
   setIsCollapsed,
   formData,
+  formErrors,
+  formWarnings,
   handleInputChange,
   handleTokensChange,
   handleWithWrapToggle,
   handleStagingToggle,
+  handleQuantizedModeToggle,
+  handleDebugIntermediateToggle,
   handleFromTokensExclusionToggle,
   handleToTokensExclusionToggle,
   onFindPath,
@@ -86,10 +90,14 @@ const CollapsibleLeftPanel = ({
             {expandedSections.form && (
               <PathFinderForm
                 formData={formData}
+                formErrors={formErrors}
+                formWarnings={formWarnings}
                 handleInputChange={handleInputChange}
                 handleTokensChange={handleTokensChange}
                 handleWithWrapToggle={handleWithWrapToggle}
                 handleStagingToggle={handleStagingToggle}
+                handleQuantizedModeToggle={handleQuantizedModeToggle}
+                handleDebugIntermediateToggle={handleDebugIntermediateToggle}
                 handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
                 handleToTokensExclusionToggle={handleToTokensExclusionToggle}
                 onFindPath={onFindPath}

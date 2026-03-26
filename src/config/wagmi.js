@@ -73,7 +73,13 @@ const createConnectors = () => {
 }
 
 export const config = createConfig({
-  chains: [gnosis],
+  chains: [{
+    ...gnosis,
+    rpcUrls: {
+      public: { http: ['https://rpc.aboutcircles.com'] },
+      default: { http: ['https://rpc.aboutcircles.com'] },
+    },
+  }],
   connectors: createConnectors(),
   transports: {
     [gnosis.id]: http(),

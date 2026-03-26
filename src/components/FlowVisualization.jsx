@@ -42,17 +42,22 @@ const FlowVisualization = () => {
   
   const { shouldAutoSimplify, setPreset, toggleFeature, config } = usePerformance();
   
-  const { 
+  const {
     formData, 
+    formErrors,
     handleInputChange, 
     handleTokensChange, 
     handleWithWrapToggle,
     handleStagingToggle,
+    handleQuantizedModeToggle,
+    handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,
     handleToTokensExclusionToggle,
     setFromTokensIncludeValue,
     setToTokensIncludeValue,
+    validateFormData,
   } = useFormData();
+  const [formWarnings, setFormWarnings] = useState([]);
   
   const {
     pathData,
@@ -399,8 +404,27 @@ const FlowVisualization = () => {
 
   const handleFindPath = useCallback(async (overrideFormData) => {
     const baseData = overrideFormData || formData;
+    const validation = validateFormData(baseData);
+    setFormWarnings(validation.warnings || []);
+    if (!validation.isValid) {
+      return;
+    }
     await executeFindPath(baseData);
-  }, [formData, executeFindPath]);
+  }, [formData, executeFindPath, validateFormData]);
+
+  const noPathSuggestions = useMemo(() => {
+    if (!pathData) return [];
+    const hasNoPath = String(pathData?.maxFlow || '0') === '0' && (pathData?.transfers?.length || 0) === 0;
+    if (!hasNoPath) return [];
+
+    return [
+      'Remove token exclusions',
+      'Clear token allowlists',
+      'Disable Quantized Mode',
+      'Try enabling wrapped tokens',
+      'Add simulated trust/balance entries',
+    ];
+  }, [pathData]);
 
   const isQuickTokenSelected = useCallback((tokenAddress) => {
     if (!tokenAddress) return false;
@@ -792,10 +816,14 @@ const FlowVisualization = () => {
             isCollapsed={isCollapsed}
             setIsCollapsed={setIsCollapsed}
             formData={formData}
+            formErrors={formErrors}
+            formWarnings={formWarnings}
             handleInputChange={handleInputChange}
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
             handleStagingToggle={handleStagingToggle}
+            handleQuantizedModeToggle={handleQuantizedModeToggle}
+            handleDebugIntermediateToggle={handleDebugIntermediateToggle}
             handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
             handleToTokensExclusionToggle={handleToTokensExclusionToggle}
             onFindPath={handleFindPath}
@@ -923,6 +951,18 @@ const FlowVisualization = () => {
                     </p>
                   </div>
                 </div>
+              )}
+              {noPathSuggestions.length > 0 && (
+                <Card className="absolute bottom-4 left-4 z-10 bg-amber-50 border-amber-200 max-w-sm">
+                  <CardContent className="p-3">
+                    <p className="text-xs font-semibold text-amber-800">No feasible route under current constraints</p>
+                    <ul className="mt-1 list-disc list-inside text-xs text-amber-700">
+                      {noPathSuggestions.map((tip) => (
+                        <li key={tip}>{tip}</li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
               )}
             </div>
 
@@ -1188,6 +1228,7 @@ const FlowVisualization = () => {
                     <TabsContent isActive={activeTab === 'parameters'} className="h-full">
                       <FlowMatrixParams
                         pathData={filteredPathData || pathData}
+                        rawPathData={rawPathData}
                         sender={formData.From}
                         receiver={formData.To}
                         showProcessed={showProcessed}

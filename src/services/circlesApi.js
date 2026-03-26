@@ -2,11 +2,13 @@ import { CirclesData, CirclesRpc as LegacyCirclesRpc } from "@circles-sdk/data";
 import { Profiles } from "@circles-sdk/profiles";
 import { CirclesRpc } from "@aboutcircles/sdk-rpc";
 import {
+  createFlowMatrix,
   getTokenInfoMapFromPath,
   getWrappedTokensFromPath,
   replaceWrappedTokensWithAvatars,
   shrinkPathValues,
 } from "@aboutcircles/sdk-pathfinder";
+import { encodeFunctionData, encodePacked, concatHex } from 'viem';
 import cacheService from './cacheService';
 
 export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
@@ -60,6 +62,40 @@ export const parseAddressList = (addressString) => {
     .filter(addr => addr && addr.startsWith('0x'));
 };
 
+const parseJsonArray = (jsonText, fallback = []) => {
+  if (!jsonText || !jsonText.trim()) return fallback;
+  try {
+    const parsed = JSON.parse(jsonText);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const normalizeAddress = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+
+const dedupeAddresses = (addresses) => Array.from(new Set(addresses.map(normalizeAddress).filter(Boolean)));
+
+const toValidUint = (value) => {
+  try {
+    const parsed = BigInt(value);
+    return parsed >= 0n ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const stringifyBigInts = (value) => {
+  if (typeof value === 'bigint') return value.toString();
+  if (Array.isArray(value)) return value.map(stringifyBigInts);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, stringifyBigInts(nested)])
+    );
+  }
+  return value;
+};
+
 export const ethToWei = (crcAmount) => {
   try {
     if (!crcAmount || isNaN(crcAmount)) return '0';
@@ -89,11 +125,44 @@ export const findPath = async (formData, sdkRpc) => {
     const excludedToTokensArray = formData.IsToTokensExcluded
       ? parseAddressList(formData.ExcludedToTokens) : [];
 
+    const simulatedBalances = parseJsonArray(formData.SimulatedBalances)
+      .map((entry) => {
+        const holder = normalizeAddress(entry?.holder);
+        const token = normalizeAddress(entry?.token);
+        const amount = toValidUint(entry?.amount);
+
+        if (!holder || !token || amount === null) return null;
+        return {
+          holder,
+          token,
+          amount,
+          isWrapped: entry?.isWrapped === true,
+          isStatic: entry?.isStatic === true,
+        };
+      })
+      .filter(Boolean);
+
+    const simulatedTrusts = parseJsonArray(formData.SimulatedTrusts)
+      .map((entry) => {
+        const truster = normalizeAddress(entry?.truster);
+        const trustee = normalizeAddress(entry?.trustee);
+
+        if (!truster || !trustee) return null;
+        return { truster, trustee };
+      })
+      .filter(Boolean);
+
+    const simulatedConsentedAvatars = dedupeAddresses(
+      parseAddressList(formData.SimulatedConsentedAvatars)
+    );
+
     const params = {
-      from: formData.From,
-      to: formData.To,
+      from: normalizeAddress(formData.From),
+      to: normalizeAddress(formData.To),
       targetFlow: BigInt(formData.Amount),
       useWrappedBalances: formData.WithWrap,
+      quantizedMode: formData.QuantizedMode === true,
+      debugShowIntermediateSteps: formData.DebugShowIntermediateSteps === true,
     };
 
     if (fromTokensArray.length > 0) params.fromTokens = fromTokensArray;
@@ -106,18 +175,17 @@ export const findPath = async (formData, sdkRpc) => {
       params.maxTransfers = Number(formData.MaxTransfers);
     }
 
+    if (simulatedBalances.length > 0) params.simulatedBalances = simulatedBalances;
+    if (simulatedTrusts.length > 0) params.simulatedTrusts = simulatedTrusts;
+    if (simulatedConsentedAvatars.length > 0) params.simulatedConsentedAvatars = simulatedConsentedAvatars;
+
     console.log('SDK findPath params:', params);
 
     const result = await rpc.pathfinder.findPath(params);
 
-    // SDK returns bigints — convert to strings for backward compat with visualization
-    return {
-      maxFlow: result.maxFlow.toString(),
-      transfers: result.transfers.map(t => ({
-        ...t,
-        value: t.value.toString(),
-      })),
-    };
+    // SDK returns bigints — convert to strings for backward compatibility,
+    // including optional debug/simulation payloads.
+    return stringifyBigInts(result);
   } catch (err) {
     console.error('SDK findPath error:', err);
     throw err;
@@ -446,4 +514,376 @@ export const fetchSinkTrustAvatars = async (sinkAddress, sdkRpc) => {
     console.error('Error fetching sink trust avatars:', error);
     throw error;
   }
+};
+
+const HUB_ABI_MIN = [
+  {
+    type: 'function',
+    name: 'operateFlowMatrix',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: '_flowVertices', type: 'address[]' },
+      {
+        name: '_flow',
+        type: 'tuple[]',
+        components: [
+          { name: 'streamSinkId', type: 'uint16' },
+          { name: 'amount', type: 'uint192' },
+        ]
+      },
+      {
+        name: '_streams',
+        type: 'tuple[]',
+        components: [
+          { name: 'sourceCoordinate', type: 'uint16' },
+          { name: 'flowEdgeIds', type: 'uint16[]' },
+          { name: 'data', type: 'bytes' },
+        ]
+      },
+      { name: '_packedCoordinates', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'wrap',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: '_avatar', type: 'address' },
+      { name: '_amount', type: 'uint256' },
+      { name: '_type', type: 'uint8' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'setApprovalForAll',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'operator', type: 'address' },
+      { name: 'approved', type: 'bool' },
+    ],
+    outputs: [],
+  },
+];
+
+const WRAPPER_ABI_MIN = [
+  {
+    type: 'function',
+    name: 'unwrap',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: '_amount', type: 'uint256' }],
+    outputs: [],
+  },
+];
+
+const SAFE_ABI_MIN = [
+  {
+    type: 'function',
+    name: 'execTransaction',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+      { name: 'operation', type: 'uint8' },
+      { name: 'safeTxGas', type: 'uint256' },
+      { name: 'baseGas', type: 'uint256' },
+      { name: 'gasPrice', type: 'uint256' },
+      { name: 'gasToken', type: 'address' },
+      { name: 'refundReceiver', type: 'address' },
+      { name: 'signatures', type: 'bytes' },
+    ],
+    outputs: [{ name: 'success', type: 'bool' }],
+  },
+];
+
+const MULTISEND_ABI_MIN = [
+  {
+    type: 'function',
+    name: 'multiSend',
+    stateMutability: 'payable',
+    inputs: [{ name: 'transactions', type: 'bytes' }],
+    outputs: [],
+  },
+];
+
+const isWrapperType = (type) => (type || '').startsWith('CrcV2_ERC20WrapperDeployed');
+
+const getTransferTokenCandidates = (transfer) => {
+  const candidates = [transfer?.tokenOwner, transfer?.token, transfer?.tokenAddress]
+    .map((value) => (typeof value === 'string' ? value.toLowerCase() : ''))
+    .filter(Boolean);
+  return Array.from(new Set(candidates));
+};
+
+const toHex32 = (value) => value.toString(16).padStart(64, '0');
+
+const asHexData = (value) => {
+  if (!value) return '0x';
+  if (typeof value === 'string') return value;
+  if (value instanceof Uint8Array) {
+    return `0x${Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  }
+  return '0x';
+};
+
+const encodeMultiSendTransactions = (calls) => {
+  const chunks = calls.map((call) => {
+    const to = call.to.toLowerCase().replace(/^0x/, '').padStart(40, '0');
+    const data = (call.data || '0x').replace(/^0x/, '');
+    const operation = '00';
+    const value = toHex32(0n);
+    const dataLength = toHex32(BigInt(data.length / 2));
+    return `${operation}${to}${value}${dataLength}${data}`;
+  });
+  return `0x${chunks.join('')}`;
+};
+
+const buildPreValidatedSignature = (owner) => {
+  const normalized = owner?.toLowerCase();
+  return concatHex([
+    encodePacked(['address'], [normalized]),
+    '0x0000000000000000000000000000000000000000000000000000000000000000',
+    '0x01'
+  ]);
+};
+
+export const buildSafeFlowMatrixSimulationTx = async ({
+  pathData,
+  sender,
+  receiver,
+  signer,
+  hubAddress,
+  multisendAddress = '0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761',
+  rpcUrl = API_ENDPOINT,
+}) => {
+  if (!pathData?.transfers?.length) throw new Error('No transfers available to simulate.');
+  if (!sender || !receiver) throw new Error('Sender and receiver are required for simulation.');
+  if (!signer) throw new Error('Connected signer address is required for simulation.');
+
+  const source = sender.toLowerCase();
+  const sink = receiver.toLowerCase();
+  const normalizedSigner = signer.toLowerCase();
+  const hub = (hubAddress || HUB_ADDRESS).toLowerCase();
+  const logLines = [];
+  const log = (line = '') => {
+    logLines.push(line);
+  };
+
+  log(`Simulation context: sender/safe=${source}, receiver=${sink}, signer=${normalizedSigner}`);
+
+  const pathWithBigInts = {
+    maxFlow: BigInt(pathData.maxFlow),
+    transfers: pathData.transfers.map((transfer) => ({
+      ...transfer,
+      from: transfer.from.toLowerCase(),
+      to: transfer.to.toLowerCase(),
+      tokenOwner: (transfer.tokenOwner || transfer.token || transfer.tokenAddress || '').toLowerCase(),
+      token: (transfer.token || '').toLowerCase(),
+      tokenAddress: (transfer.tokenAddress || '').toLowerCase(),
+      value: BigInt(transfer.value),
+    })),
+  };
+
+  const tokenInfoMap = await getTokenInfoMapFromPath(source, rpcUrl, pathWithBigInts);
+  log(`The path contains ${pathWithBigInts.transfers.length} transfers with a total flow of (demurraged: ${pathWithBigInts.maxFlow}) over ${tokenInfoMap.size} different token owners.`);
+
+  const resolveTokenInfo = (transfer) => {
+    const candidates = getTransferTokenCandidates(transfer);
+    for (const key of candidates) {
+      const info = tokenInfoMap.get(key);
+      if (info) return { info, key };
+    }
+    return { info: undefined, key: undefined };
+  };
+
+  const senderEdges = pathWithBigInts.transfers.filter((transfer) => transfer.from === source);
+  const wrappedSenderEdges = senderEdges
+    .map((transfer) => ({
+      transfer,
+      ...resolveTokenInfo(transfer),
+    }))
+    .filter(({ info }) => isWrapperType(info?.type));
+  log(`The path contains ${wrappedSenderEdges.length} wrapped edges originating from the sender.`);
+
+  if (wrappedSenderEdges.length === 0 && senderEdges.length > 0) {
+    const diagnostics = senderEdges
+      .slice(0, 8)
+      .map((transfer) => {
+        const candidates = getTransferTokenCandidates(transfer);
+        const resolvedType = candidates.map((key) => `${key}:${tokenInfoMap.get(key)?.type || 'unknown'}`).join(', ');
+        return `    - token candidates [${candidates.join(', ')}] => ${resolvedType || 'no candidates'}`;
+      });
+    log('  Sender edge diagnostics (first 8):');
+    diagnostics.forEach((line) => log(line));
+  }
+
+  const staticByWrapper = {};
+  const demurragedByWrapper = {};
+
+  wrappedSenderEdges.forEach(({ transfer, info, key }) => {
+    const wrapperKey = (key || transfer.tokenOwner || '').toLowerCase();
+    if (!wrapperKey) return;
+    if (info?.type === 'CrcV2_ERC20WrapperDeployed_Inflationary') {
+      staticByWrapper[wrapperKey] = (staticByWrapper[wrapperKey] || 0n) + transfer.value;
+    }
+    if (info?.type === 'CrcV2_ERC20WrapperDeployed_Demurraged') {
+      demurragedByWrapper[wrapperKey] = (demurragedByWrapper[wrapperKey] || 0n) + transfer.value;
+    }
+  });
+
+  const staticEntries = Object.entries(staticByWrapper);
+  const demurragedEntries = Object.entries(demurragedByWrapper);
+  log(`  - Of which ${staticEntries.length} use static wrapped tokens:`);
+  staticEntries.forEach(([wrapper, total]) => {
+    log(`    - ${wrapper} (demurraged: ${total})`);
+  });
+  log(`  - Of which ${demurragedEntries.length} use demurraged wrapped tokens:`);
+  demurragedEntries.forEach(([wrapper, total]) => {
+    log(`    - ${wrapper} (demurraged: ${total})`);
+  });
+  log();
+
+  const unwrapCalls = [];
+  const wrapCalls = [];
+  const staticWrapperBalances = {};
+
+  const senderBalances = await fetchAddressTokenBalances(source, false);
+  if (staticEntries.length > 0) {
+    log(`The path uses ${staticEntries.length} different static tokens which must be unwrapped completely before they can be used in a flow matrix transfer.`);
+    log('  Getting all balances of the sender for static wrapped tokens...');
+  }
+  senderBalances.forEach((row) => {
+    const tokenAddress = row?.tokenAddress?.toLowerCase?.();
+    if (!tokenAddress || !staticByWrapper[tokenAddress]) return;
+    const staticUnits = BigInt(row?.staticAttoCircles || row?.attoStaticCircles || row?.attoCircles || '0');
+    staticWrapperBalances[tokenAddress] = staticUnits;
+    log(`    - ${tokenAddress} (static: ${staticUnits})`);
+    if (staticUnits > 0n) {
+      log(`      > Unwrapping full amount of static wrapped token: ${tokenAddress} (static: ${staticUnits})`);
+      unwrapCalls.push({
+        to: tokenAddress,
+        data: encodeFunctionData({ abi: WRAPPER_ABI_MIN, functionName: 'unwrap', args: [staticUnits] }),
+      });
+    }
+  });
+
+  Object.entries(demurragedByWrapper).forEach(([wrapper, amount]) => {
+    if (amount <= 0n) return;
+    log(`  > Unwrapping precise amount of demurraged wrapped token: ${wrapper} (demurraged: ${amount})`);
+    unwrapCalls.push({
+      to: wrapper,
+      data: encodeFunctionData({ abi: WRAPPER_ABI_MIN, functionName: 'unwrap', args: [amount] }),
+    });
+  });
+  log();
+  log('Replacing wrapped token owners in the path with their real token owners...');
+
+  const staticSpent = {};
+  const rewrittenTransfers = pathWithBigInts.transfers.map((transfer) => {
+    const { info, key } = resolveTokenInfo(transfer);
+    if (!info || !isWrapperType(info.type)) return transfer;
+    log(` - Replacing wrapped token owner in transfer (from: ${transfer.from}, to: ${transfer.to}, tokenOwner: ${transfer.tokenOwner}) with real token owner: ${info.tokenOwner}`);
+    if (info.type === 'CrcV2_ERC20WrapperDeployed_Inflationary') {
+      const wrapperKey = (key || transfer.tokenOwner || '').toLowerCase();
+      staticSpent[wrapperKey] = (staticSpent[wrapperKey] || 0n) + transfer.value;
+    }
+    return {
+      ...transfer,
+      tokenOwner: (info.tokenOwner || transfer.tokenOwner).toLowerCase(),
+    };
+  });
+
+  Object.entries(staticWrapperBalances).forEach(([wrapperToken, unwrappedTotal]) => {
+    const spent = staticSpent[wrapperToken] || 0n;
+    const remaining = unwrappedTotal > spent ? unwrappedTotal - spent : 0n;
+    log(`  - ${wrapperToken}: spent (demurraged: ${spent}), remaining to re-wrap (demurraged: ${remaining})`);
+    if (remaining <= 0n) return;
+
+    const realTokenOwner = tokenInfoMap.get(wrapperToken)?.tokenOwner;
+    if (!realTokenOwner) return;
+
+    wrapCalls.push({
+      to: hub,
+      data: encodeFunctionData({
+        abi: HUB_ABI_MIN,
+        functionName: 'wrap',
+        args: [realTokenOwner.toLowerCase(), remaining, 1],
+      }),
+    });
+  });
+
+  const flowMatrix = createFlowMatrix(source, sink, BigInt(pathWithBigInts.maxFlow), rewrittenTransfers);
+  log();
+  log(`Flow matrix created with ${flowMatrix.flowVertices.length} vertices and ${flowMatrix.flowEdges.length} edges.`);
+
+  const operateFlowMatrixCall = {
+    to: hub,
+    data: encodeFunctionData({
+      abi: HUB_ABI_MIN,
+      functionName: 'operateFlowMatrix',
+      args: [
+        flowMatrix.flowVertices,
+        flowMatrix.flowEdges.map((edge) => ({ streamSinkId: edge.streamSinkId, amount: BigInt(edge.amount) })),
+        flowMatrix.streams.map((stream) => ({
+          sourceCoordinate: stream.sourceCoordinate,
+          flowEdgeIds: stream.flowEdgeIds,
+          data: asHexData(stream.data),
+        })),
+        flowMatrix.packedCoordinates,
+      ],
+    }),
+  };
+
+  const selfApprovalCall = {
+    to: hub,
+    data: encodeFunctionData({
+      abi: HUB_ABI_MIN,
+      functionName: 'setApprovalForAll',
+      args: [hub, true],
+    }),
+  };
+
+  const calls = [selfApprovalCall, ...unwrapCalls, operateFlowMatrixCall, ...wrapCalls];
+  log(`Planned sub-calls: ${calls.length} (self-approval: 1, unwrap: ${unwrapCalls.length}, operateFlowMatrix: 1, re-wrap: ${wrapCalls.length}).`);
+  log('Order: self-approval → unwrap(s) → operateFlowMatrix → re-wrap(s)');
+  const packedCalls = encodeMultiSendTransactions(calls);
+  const multiSendCallData = encodeFunctionData({
+    abi: MULTISEND_ABI_MIN,
+    functionName: 'multiSend',
+    args: [packedCalls],
+  });
+
+  const safeCalldata = encodeFunctionData({
+    abi: SAFE_ABI_MIN,
+    functionName: 'execTransaction',
+    args: [
+      multisendAddress,
+      0n,
+      multiSendCallData,
+      1,
+      0n,
+      0n,
+      0n,
+      '0x0000000000000000000000000000000000000000',
+      '0x0000000000000000000000000000000000000000',
+      buildPreValidatedSignature(signer),
+    ],
+  });
+
+  return {
+    safeAddress: source,
+    gasFrom: normalizedSigner,
+    safeCalldata,
+    flowMatrix,
+    summary: {
+      wrappedEdgesFromSender: wrappedSenderEdges.length,
+      unwrapCalls: unwrapCalls.length,
+      wrapCalls: wrapCalls.length,
+      calls: calls.length,
+      rewrittenTransfers: rewrittenTransfers.length,
+    },
+    simulationLog: logLines.join('\n'),
+  };
 };

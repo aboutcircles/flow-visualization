@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X, AlertTriangle } from "lucide-react";
 import { createFlowMatrix } from "@aboutcircles/sdk-pathfinder";
 import { encodeFunctionData } from "viem";
-import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from "wagmi";
 import { gnosis } from "wagmi/chains";
 import { HUB_ADDRESS } from "@/config/wagmi";
+import { buildSafeFlowMatrixSimulationTx } from "@/services/circlesApi";
 
 // Just the operateFlowMatrix function ABI
 const OPERATE_FLOW_MATRIX_ABI = [
@@ -72,18 +73,62 @@ const OPERATE_FLOW_MATRIX_ABI = [
 
 const HUB_V2_ADDRESS = '0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8';
 
+const SAFE_OWNERS_ABI = [
+  {
+    type: 'function',
+    name: 'getOwners',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address[]' }],
+  },
+];
+
 function bytesToHex(bytes) {
   return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltered }) => {
+const resolveSimulationSigner = async ({ publicClient, safeAddress, connectedAddress }) => {
+  const normalizedSafe = safeAddress?.toLowerCase?.();
+  const normalizedConnected = connectedAddress?.toLowerCase?.();
+
+  const owners = await publicClient.readContract({
+    address: normalizedSafe,
+    abi: SAFE_OWNERS_ABI,
+    functionName: 'getOwners',
+  });
+
+  const normalizedOwners = (owners || []).map((owner) => owner?.toLowerCase?.()).filter(Boolean);
+  if (normalizedOwners.length === 0) {
+    throw new Error(`No Safe owners found for sender safe ${normalizedSafe}.`);
+  }
+
+  if (normalizedConnected && normalizedOwners.includes(normalizedConnected)) {
+    return {
+      signer: normalizedConnected,
+      owners: normalizedOwners,
+      usesConnectedWallet: true,
+    };
+  }
+
+  return {
+    signer: normalizedOwners[0],
+    owners: normalizedOwners,
+    usesConnectedWallet: false,
+  };
+};
+
+const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcessed, isFiltered }) => {
   const [flowMatrix, setFlowMatrix] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
   const [expanded, setExpanded] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simulationError, setSimulationError] = useState(null);
+  const [simulationResult, setSimulationResult] = useState(null);
 
   const { address, isConnected, chain } = useAccount();
+  const publicClient = usePublicClient();
   const { connectors, connect } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
@@ -247,6 +292,79 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
     }
   };
 
+  const handleSimulateTransaction = async () => {
+    const simulationPathData = rawPathData || pathData;
+    if (!simulationPathData || !sender || !receiver || !address || !publicClient) return;
+
+    setSimulationError(null);
+    setSimulationResult(null);
+    setIsSimulating(true);
+
+    try {
+      const signerSelection = await resolveSimulationSigner({
+        publicClient,
+        safeAddress: sender,
+        connectedAddress: address,
+      });
+
+      const simulationTx = await buildSafeFlowMatrixSimulationTx({
+        pathData: simulationPathData,
+        sender,
+        receiver,
+        signer: signerSelection.signer,
+        hubAddress: HUB_ADDRESS,
+      });
+
+      console.groupCollapsed('[FlowMatrix] Safe simulation');
+      console.info('Simulation context', {
+        sender: sender?.toLowerCase?.(),
+        receiver: receiver?.toLowerCase?.(),
+        connectedWallet: address?.toLowerCase?.(),
+        simulationSigner: signerSelection.signer,
+        safeOwners: signerSelection.owners,
+        signerSelection: signerSelection.usesConnectedWallet
+          ? 'connected wallet is a Safe owner'
+          : 'connected wallet is not a Safe owner; using first Safe owner',
+        safeAddress: simulationTx.safeAddress,
+        gasFrom: simulationTx.gasFrom,
+      });
+      if (simulationTx.simulationLog) {
+        console.log(simulationTx.simulationLog);
+      }
+
+      const gas = await publicClient.estimateGas({
+        account: simulationTx.gasFrom,
+        to: simulationTx.safeAddress,
+        data: simulationTx.safeCalldata,
+      });
+
+      console.info('Estimated gas', gas.toString());
+      console.groupEnd();
+
+      if (gas === 0n) {
+        throw new Error('Gas estimation returned 0 – path likely too long for a single block.');
+      }
+
+      setSimulationResult({
+        gas,
+        ...simulationTx.summary,
+        simulationLog: simulationTx.simulationLog,
+      });
+    } catch (err) {
+      console.error('[FlowMatrix] Safe simulation failed', err);
+      if (console.groupEnd) {
+        try {
+          console.groupEnd();
+        } catch {
+          // no-op
+        }
+      }
+      setSimulationError(err?.shortMessage || err?.message || 'Simulation failed');
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
   if (error) {
     return (
       <Card className="mt-4">
@@ -355,6 +473,14 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
                   </Button>
                 )}
                 <Button
+                  onClick={handleSimulateTransaction}
+                  disabled={!isConnected || isWrongChain || isSimulating}
+                  variant="outline"
+                  className="flex items-center gap-1"
+                >
+                  {isSimulating ? 'Simulating…' : 'Simulate'}
+                </Button>
+                <Button
                   onClick={() => disconnect()}
                   variant="outline"
                   className="flex items-center gap-1"
@@ -384,6 +510,30 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
             Transaction submitted: {hash.slice(0, 10)}...{hash.slice(-8)}
             {isConfirming && " - Confirming..."}
             {isConfirmed && " - Confirmed!"}
+          </div>
+        )}
+
+        {simulationError && (
+          <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm">
+            Simulation error: {simulationError}
+          </div>
+        )}
+
+        {simulationResult && (
+          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-900 space-y-1">
+            <div className="font-medium">Safe simulation</div>
+            <div>Estimated gas: {simulationResult.gas.toString()}</div>
+            <div>Wrapped sender edges: {simulationResult.wrappedEdgesFromSender}</div>
+            <div>Sub-calls: {simulationResult.calls} (unwrap: {simulationResult.unwrapCalls}, re-wrap: {simulationResult.wrapCalls})</div>
+            <div className="text-xs text-blue-700">Order: self-approval → unwrap(s) → operateFlowMatrix → re-wrap(s)</div>
+            {simulationResult.simulationLog && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Simulation log</div>
+                <pre className="mt-1 max-h-64 overflow-auto rounded border border-blue-200 bg-white/70 p-2 font-mono text-xs text-blue-900 whitespace-pre-wrap text-left">
+                  {simulationResult.simulationLog}
+                </pre>
+              </div>
+            )}
           </div>
         )}
 
@@ -449,7 +599,11 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
 
 FlowMatrixParams.propTypes = {
   pathData: PropTypes.object,
+  rawPathData: PropTypes.object,
   sender: PropTypes.string,
+  receiver: PropTypes.string,
+  showProcessed: PropTypes.bool,
+  isFiltered: PropTypes.bool,
 };
 
 export default FlowMatrixParams;
