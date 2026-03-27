@@ -998,6 +998,12 @@ const FlowVisualization = () => {
                         Flow Matrix Parameters
                       </TabsTrigger>
                       <TabsTrigger
+                        isActive={activeTab === 'simulation'}
+                        onClick={() => setActiveTab('simulation')}
+                      >
+                        Simulation
+                      </TabsTrigger>
+                      <TabsTrigger
                         isActive={activeTab === 'stats'}
                         onClick={() => setActiveTab('stats')}
                       >
@@ -1233,6 +1239,19 @@ const FlowVisualization = () => {
                         receiver={formData.To}
                         showProcessed={showProcessed}
                         isFiltered={!!filteredPathData}
+                        view="params"
+                      />
+                    </TabsContent>
+
+                    <TabsContent isActive={activeTab === 'simulation'} className="h-full">
+                      <FlowMatrixParams
+                        pathData={filteredPathData || pathData}
+                        rawPathData={rawPathData}
+                        sender={formData.From}
+                        receiver={formData.To}
+                        showProcessed={showProcessed}
+                        isFiltered={!!filteredPathData}
+                        view="simulation"
                       />
                     </TabsContent>
                     

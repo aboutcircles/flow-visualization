@@ -123,7 +123,9 @@ const resolveSimulationSigner = async ({ publicClient, safeAddress, connectedAdd
   };
 };
 
-const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcessed, isFiltered }) => {
+const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcessed, isFiltered, view = 'all' }) => {
+  const showParamsSection = view !== 'simulation';
+  const showSimulationSection = view !== 'params';
   const [flowMatrix, setFlowMatrix] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
@@ -145,6 +147,12 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
   });
 
   useEffect(() => {
+    if (!showParamsSection) {
+      setFlowMatrix(null);
+      setError(null);
+      return;
+    }
+
     if (!pathData || !sender) return;
     setError(null);
 
@@ -165,7 +173,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
       setError(err.message);
       setFlowMatrix(null);
     }
-  }, [pathData, sender, receiver]);
+  }, [pathData, sender, receiver, showParamsSection]);
 
   useEffect(() => {
     if (writeError) {
@@ -382,7 +390,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
     }
   };
 
-  if (error) {
+  if (error && showParamsSection) {
     return (
       <Card className="mt-4">
         <CardContent className="pt-4">
@@ -392,22 +400,26 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
     );
   }
 
-  if (!flowMatrix) return null;
+  if (showParamsSection && !flowMatrix) return null;
 
-  const params = getJsonParams();
-  const shortParams = {
-    ...params,
-    _flowVertices: params._flowVertices.length > 3 ? [...params._flowVertices.slice(0, 3), "..."] : params._flowVertices,
-    _flow: params._flow.length > 3 ? [...params._flow.slice(0, 3), "..."] : params._flow,
-  };
+  const params = showParamsSection ? getJsonParams() : null;
+  const shortParams = showParamsSection && params
+    ? {
+        ...params,
+        _flowVertices: params._flowVertices.length > 3 ? [...params._flowVertices.slice(0, 3), "..."] : params._flowVertices,
+        _flow: params._flow.length > 3 ? [...params._flow.slice(0, 3), "..."] : params._flow,
+      }
+    : null;
 
-  const formattedJson = expanded
+  const formattedJson = showParamsSection
+    ? (expanded
     ? JSON.stringify({ method: "operateFlowMatrix", params }, null, 2)
-    : JSON.stringify({ method: "operateFlowMatrix", params: shortParams }, null, 2);
+    : JSON.stringify({ method: "operateFlowMatrix", params: shortParams }, null, 2))
+    : null;
 
   let calldata = null;
   try {
-    calldata = getCalldata();
+    calldata = showParamsSection ? getCalldata() : null;
   } catch (err) {
     // will show error inline
   }
@@ -433,35 +445,41 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
           <div className="flex items-center gap-2">
             <Code size={18} className="text-blue-500" />
             <h2 className="text-lg font-semibold">
-              operateFlowMatrix
+              {showSimulationSection && !showParamsSection ? 'Flow Matrix Simulation' : 'operateFlowMatrix'}
             </h2>
-            <span className="text-xs text-gray-400 font-mono">{HUB_V2_ADDRESS.slice(0, 10)}…</span>
+            {showParamsSection && (
+              <span className="text-xs text-gray-400 font-mono">{HUB_V2_ADDRESS.slice(0, 10)}…</span>
+            )}
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Button
-              onClick={() => setExpanded(!expanded)}
-              variant="outline"
-              className="flex items-center gap-1"
-            >
-              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              {expanded ? "Less" : "Full"}
-            </Button>
-            <Button
-              onClick={() => copyToClipboard("json")}
-              variant="outline"
-              className="flex items-center gap-1"
-            >
-              {copied.json ? <Check size={16} /> : <Copy size={16} />}
-              {copied.json ? "Copied!" : "JSON"}
-            </Button>
-            <Button
-              onClick={() => copyToClipboard("calldata")}
-              variant="outline"
-              className="flex items-center gap-1"
-            >
-              {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
-              {copied.calldata ? "Copied!" : "Calldata"}
-            </Button>
+            {showParamsSection && (
+              <>
+                <Button
+                  onClick={() => setExpanded(!expanded)}
+                  variant="outline"
+                  className="flex items-center gap-1"
+                >
+                  {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  {expanded ? "Less" : "Full"}
+                </Button>
+                <Button
+                  onClick={() => copyToClipboard("json")}
+                  variant="outline"
+                  className="flex items-center gap-1"
+                >
+                  {copied.json ? <Check size={16} /> : <Copy size={16} />}
+                  {copied.json ? "Copied!" : "JSON"}
+                </Button>
+                <Button
+                  onClick={() => copyToClipboard("calldata")}
+                  variant="outline"
+                  className="flex items-center gap-1"
+                >
+                  {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
+                  {copied.calldata ? "Copied!" : "Calldata"}
+                </Button>
+              </>
+            )}
             {!isConnected ? (
               <Button
                 onClick={() => setShowWalletModal(true)}
@@ -480,23 +498,27 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
                     Switch to Gnosis Chain
                   </Button>
                 ) : (
+                  showParamsSection && (
+                    <Button
+                      onClick={handleExecuteTransaction}
+                      disabled={!canExecute}
+                      className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
+                    >
+                      <Send size={16} />
+                      {isWritePending || isConfirming ? "Executing..." : isConfirmed ? "Transaction Confirmed!" : "Execute Transaction"}
+                    </Button>
+                  )
+                )}
+                {showSimulationSection && (
                   <Button
-                    onClick={handleExecuteTransaction}
-                    disabled={!canExecute}
-                    className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
+                    onClick={handleSimulateTransaction}
+                    disabled={!isConnected || isWrongChain || isSimulating}
+                    variant="outline"
+                    className="flex items-center gap-1"
                   >
-                    <Send size={16} />
-                    {isWritePending || isConfirming ? "Executing..." : isConfirmed ? "Transaction Confirmed!" : "Execute Transaction"}
+                    {isSimulating ? 'Simulating…' : 'Simulate'}
                   </Button>
                 )}
-                <Button
-                  onClick={handleSimulateTransaction}
-                  disabled={!isConnected || isWrongChain || isSimulating}
-                  variant="outline"
-                  className="flex items-center gap-1"
-                >
-                  {isSimulating ? 'Simulating…' : 'Simulate'}
-                </Button>
                 <Button
                   onClick={() => disconnect()}
                   variant="outline"
@@ -530,7 +552,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
           </div>
         )}
 
-        {simulationError && (
+        {showSimulationSection && simulationError && (
           <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm space-y-2">
             <div>Simulation error: {simulationError}</div>
             {simulationErrorLog && (
@@ -544,7 +566,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
           </div>
         )}
 
-        {simulationResult && (
+        {showSimulationSection && simulationResult && (
           <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-900 space-y-1">
             <div className="font-medium">Safe simulation</div>
             <div>Estimated gas: {simulationResult.gas.toString()}</div>
@@ -661,12 +683,14 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
           </div>
         )}
 
-        <div className="relative">
-          <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-96 font-mono text-sm">
-            <pre className="whitespace-pre-wrap text-left">{formattedJson}</pre>
+        {showParamsSection && (
+          <div className="relative">
+            <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-96 font-mono text-sm">
+              <pre className="whitespace-pre-wrap text-left">{formattedJson}</pre>
+            </div>
           </div>
-        </div>
-        {calldata && (
+        )}
+        {showParamsSection && calldata && (
           <div className="mt-3">
             <p className="text-xs text-gray-500 mb-1">Encoded calldata ({calldata.length} chars)</p>
             <div className="bg-gray-50 p-2 rounded-md overflow-auto max-h-24 font-mono text-xs text-gray-600 break-all">
@@ -728,6 +752,7 @@ FlowMatrixParams.propTypes = {
   receiver: PropTypes.string,
   showProcessed: PropTypes.bool,
   isFiltered: PropTypes.bool,
+  view: PropTypes.oneOf(['all', 'params', 'simulation']),
 };
 
 export default FlowMatrixParams;
