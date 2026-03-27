@@ -87,6 +87,12 @@ function bytesToHex(bytes) {
   return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+const toDisplayValue = (value) => {
+  if (typeof value === 'bigint') return value.toString();
+  if (value === null || value === undefined) return '—';
+  return String(value);
+};
+
 const resolveSimulationSigner = async ({ publicClient, safeAddress, connectedAddress }) => {
   const normalizedSafe = safeAddress?.toLowerCase?.();
   const normalizedConnected = connectedAddress?.toLowerCase?.();
@@ -125,6 +131,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationError, setSimulationError] = useState(null);
+  const [simulationErrorLog, setSimulationErrorLog] = useState('');
   const [simulationResult, setSimulationResult] = useState(null);
 
   const { address, isConnected, chain } = useAccount();
@@ -297,8 +304,10 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
     if (!simulationPathData || !sender || !receiver || !address || !publicClient) return;
 
     setSimulationError(null);
+    setSimulationErrorLog('');
     setSimulationResult(null);
     setIsSimulating(true);
+    let lastSimulationLog = '';
 
     try {
       const signerSelection = await resolveSimulationSigner({
@@ -307,13 +316,16 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
         connectedAddress: address,
       });
 
-      const simulationTx = await buildSafeFlowMatrixSimulationTx({
+      const buildSimulationTx = () => buildSafeFlowMatrixSimulationTx({
         pathData: simulationPathData,
         sender,
         receiver,
         signer: signerSelection.signer,
         hubAddress: HUB_ADDRESS,
       });
+
+      const simulationTx = await buildSimulationTx();
+      lastSimulationLog = simulationTx?.simulationLog || '';
 
       console.groupCollapsed('[FlowMatrix] Safe simulation');
       console.info('Simulation context', {
@@ -348,6 +360,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
       setSimulationResult({
         gas,
         ...simulationTx.summary,
+        diagnostics: simulationTx.diagnostics,
         simulationLog: simulationTx.simulationLog,
       });
     } catch (err) {
@@ -360,6 +373,10 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
         }
       }
       setSimulationError(err?.shortMessage || err?.message || 'Simulation failed');
+      setSimulationErrorLog(
+        lastSimulationLog ||
+        ((typeof err?.simulationLog === 'string' && err.simulationLog) || '')
+      );
     } finally {
       setIsSimulating(false);
     }
@@ -514,8 +531,16 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
         )}
 
         {simulationError && (
-          <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm">
-            Simulation error: {simulationError}
+          <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm space-y-2">
+            <div>Simulation error: {simulationError}</div>
+            {simulationErrorLog && (
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-red-800">Simulation log (until error)</div>
+                <pre className="mt-1 max-h-64 overflow-auto rounded border border-red-200 bg-white/70 p-2 font-mono text-xs text-red-900 whitespace-pre-wrap text-left">
+                  {simulationErrorLog}
+                </pre>
+              </div>
+            )}
           </div>
         )}
 
@@ -524,8 +549,107 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
             <div className="font-medium">Safe simulation</div>
             <div>Estimated gas: {simulationResult.gas.toString()}</div>
             <div>Wrapped sender edges: {simulationResult.wrappedEdgesFromSender}</div>
+            {simulationResult.wrappedEdgesByType && (
+              <div className="text-xs text-blue-800">
+                Wrapped edge types: static {simulationResult.wrappedEdgesByType.static} · demurraged {simulationResult.wrappedEdgesByType.demurraged}
+              </div>
+            )}
             <div>Sub-calls: {simulationResult.calls} (unwrap: {simulationResult.unwrapCalls}, re-wrap: {simulationResult.wrapCalls})</div>
+            {simulationResult.unwrapByType && (
+              <div className="text-xs text-blue-800">
+                Unwrap targets: static {simulationResult.unwrapByType.static} · demurraged {simulationResult.unwrapByType.demurraged}
+              </div>
+            )}
             <div className="text-xs text-blue-700">Order: self-approval → unwrap(s) → operateFlowMatrix → re-wrap(s)</div>
+
+            {simulationResult.diagnostics?.staticWrappers?.length > 0 && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Static wrappers</div>
+                <div className="mt-1 overflow-auto rounded border border-blue-200 bg-white/80">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-blue-100/70 text-blue-900">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Wrapper</th>
+                        <th className="px-2 py-1 text-right">Path demurraged</th>
+                        <th className="px-2 py-1 text-right">Unwrapped static</th>
+                        <th className="px-2 py-1 text-right">Unwrapped demurraged</th>
+                        <th className="px-2 py-1 text-right">Spent demurraged</th>
+                        <th className="px-2 py-1 text-right">Re-wrap demurraged</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simulationResult.diagnostics.staticWrappers.map((row) => (
+                        <tr key={row.wrapper} className="border-t border-blue-100">
+                          <td className="px-2 py-1 font-mono text-[11px]">{row.wrapper}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.pathDemurraged)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.staticBalanceUnwrapped)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedBalanceUnwrapped)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedSpent)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedRemainingToWrap)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {simulationResult.diagnostics?.demurragedWrappers?.length > 0 && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Demurraged wrappers</div>
+                <div className="mt-1 overflow-auto rounded border border-blue-200 bg-white/80">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-blue-100/70 text-blue-900">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Wrapper</th>
+                        <th className="px-2 py-1 text-right">Path demurraged</th>
+                        <th className="px-2 py-1 text-right">Unwrap demurraged</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simulationResult.diagnostics.demurragedWrappers.map((row) => (
+                        <tr key={row.wrapper} className="border-t border-blue-100">
+                          <td className="px-2 py-1 font-mono text-[11px]">{row.wrapper}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.pathDemurraged)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedUnwrapAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {simulationResult.diagnostics?.callTimeline?.length > 0 && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Sub-call timeline</div>
+                <div className="mt-1 overflow-auto rounded border border-blue-200 bg-white/80">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-blue-100/70 text-blue-900">
+                      <tr>
+                        <th className="px-2 py-1 text-right">#</th>
+                        <th className="px-2 py-1 text-left">Action</th>
+                        <th className="px-2 py-1 text-left">To</th>
+                        <th className="px-2 py-1 text-left">Selector</th>
+                        <th className="px-2 py-1 text-right">Bytes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simulationResult.diagnostics.callTimeline.map((row) => (
+                        <tr key={`${row.index}-${row.selector}`} className="border-t border-blue-100">
+                          <td className="px-2 py-1 text-right font-mono">{row.index}</td>
+                          <td className="px-2 py-1">{row.label}</td>
+                          <td className="px-2 py-1 font-mono text-[11px]">{row.to}</td>
+                          <td className="px-2 py-1 font-mono">{row.selector}</td>
+                          <td className="px-2 py-1 text-right font-mono">{row.dataLengthBytes}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {simulationResult.simulationLog && (
               <div className="mt-2">
                 <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Simulation log</div>

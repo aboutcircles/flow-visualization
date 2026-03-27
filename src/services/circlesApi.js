@@ -6,9 +6,8 @@ import {
   getTokenInfoMapFromPath,
   getWrappedTokensFromPath,
   replaceWrappedTokensWithAvatars,
-  shrinkPathValues,
 } from "@aboutcircles/sdk-pathfinder";
-import { encodeFunctionData, encodePacked, concatHex } from 'viem';
+import { encodeFunctionData, concatHex } from 'viem';
 import cacheService from './cacheService';
 
 export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
@@ -608,7 +607,24 @@ const MULTISEND_ABI_MIN = [
   },
 ];
 
-const isWrapperType = (type) => (type || '').startsWith('CrcV2_ERC20WrapperDeployed');
+const getTokenType = (info) => (info?.tokenType || info?.type || '');
+
+const isWrapperInfo = (info) => {
+  if (!info) return false;
+  const tokenType = getTokenType(info);
+  return !!(info.isWrapped || tokenType.startsWith('CrcV2_ERC20WrapperDeployed') || tokenType.includes('ERC20Wrapper'));
+};
+
+const isStaticWrapperInfo = (info) => {
+  if (!isWrapperInfo(info)) return false;
+  const tokenType = getTokenType(info);
+  return info.isInflationary === true || tokenType.includes('Inflationary');
+};
+
+const isDemurragedWrapperInfo = (info) => {
+  if (!isWrapperInfo(info)) return false;
+  return !isStaticWrapperInfo(info);
+};
 
 const getTransferTokenCandidates = (transfer) => {
   const candidates = [transfer?.tokenOwner, transfer?.token, transfer?.tokenAddress]
@@ -642,11 +658,34 @@ const encodeMultiSendTransactions = (calls) => {
 
 const buildPreValidatedSignature = (owner) => {
   const normalized = owner?.toLowerCase();
+  const ownerWord = `0x${(normalized || '').replace(/^0x/, '').padStart(64, '0')}`;
   return concatHex([
-    encodePacked(['address'], [normalized]),
+    ownerWord,
     '0x0000000000000000000000000000000000000000000000000000000000000000',
     '0x01'
   ]);
+};
+
+const hexByteLength = (hex) => {
+  if (!hex || typeof hex !== 'string') return 0;
+  const normalized = hex.startsWith('0x') ? hex.slice(2) : hex;
+  return Math.floor(normalized.length / 2);
+};
+
+const getCallLabel = (call, hubAddress) => {
+  const to = (call?.to || '').toLowerCase();
+  const data = (call?.data || '').toLowerCase();
+  const selector = data.slice(0, 10);
+
+  if (to === (hubAddress || '').toLowerCase()) {
+    if (selector === '0xa9059cbb') return 'erc20.transfer';
+    if (selector === '0xe985e9c5') return 'setApprovalForAll';
+    if (selector === '0x3748f953') return 'operateFlowMatrix';
+    if (selector === '0xea598cb0') return 'wrap';
+  }
+
+  if (selector === '0xde0e9a3e') return 'unwrap';
+  return 'unknown';
 };
 
 export const buildSafeFlowMatrixSimulationTx = async ({
@@ -704,7 +743,7 @@ export const buildSafeFlowMatrixSimulationTx = async ({
       transfer,
       ...resolveTokenInfo(transfer),
     }))
-    .filter(({ info }) => isWrapperType(info?.type));
+    .filter(({ info }) => isWrapperInfo(info));
   log(`The path contains ${wrappedSenderEdges.length} wrapped edges originating from the sender.`);
 
   if (wrappedSenderEdges.length === 0 && senderEdges.length > 0) {
@@ -712,7 +751,9 @@ export const buildSafeFlowMatrixSimulationTx = async ({
       .slice(0, 8)
       .map((transfer) => {
         const candidates = getTransferTokenCandidates(transfer);
-        const resolvedType = candidates.map((key) => `${key}:${tokenInfoMap.get(key)?.type || 'unknown'}`).join(', ');
+        const resolvedType = candidates
+          .map((key) => `${key}:${getTokenType(tokenInfoMap.get(key)) || 'unknown'}`)
+          .join(', ');
         return `    - token candidates [${candidates.join(', ')}] => ${resolvedType || 'no candidates'}`;
       });
     log('  Sender edge diagnostics (first 8):');
@@ -725,10 +766,10 @@ export const buildSafeFlowMatrixSimulationTx = async ({
   wrappedSenderEdges.forEach(({ transfer, info, key }) => {
     const wrapperKey = (key || transfer.tokenOwner || '').toLowerCase();
     if (!wrapperKey) return;
-    if (info?.type === 'CrcV2_ERC20WrapperDeployed_Inflationary') {
+    if (isStaticWrapperInfo(info)) {
       staticByWrapper[wrapperKey] = (staticByWrapper[wrapperKey] || 0n) + transfer.value;
     }
-    if (info?.type === 'CrcV2_ERC20WrapperDeployed_Demurraged') {
+    if (isDemurragedWrapperInfo(info)) {
       demurragedByWrapper[wrapperKey] = (demurragedByWrapper[wrapperKey] || 0n) + transfer.value;
     }
   });
@@ -748,6 +789,32 @@ export const buildSafeFlowMatrixSimulationTx = async ({
   const unwrapCalls = [];
   const wrapCalls = [];
   const staticWrapperBalances = {};
+  const staticWrapperDiagnostics = {};
+  const demurragedWrapperDiagnostics = {};
+
+  Object.entries(staticByWrapper).forEach(([wrapper, amount]) => {
+    staticWrapperDiagnostics[wrapper] = {
+      wrapper,
+      pathDemurraged: amount,
+      staticBalanceUnwrapped: 0n,
+      demurragedBalanceUnwrapped: 0n,
+      demurragedSpent: 0n,
+      demurragedRemainingToWrap: 0n,
+      unwrapCallPlanned: false,
+      wrapCallPlanned: false,
+      tokenOwner: tokenInfoMap.get(wrapper)?.tokenOwner?.toLowerCase?.() || null,
+    };
+  });
+
+  Object.entries(demurragedByWrapper).forEach(([wrapper, amount]) => {
+    demurragedWrapperDiagnostics[wrapper] = {
+      wrapper,
+      pathDemurraged: amount,
+      demurragedUnwrapAmount: amount,
+      unwrapCallPlanned: amount > 0n,
+      tokenOwner: tokenInfoMap.get(wrapper)?.tokenOwner?.toLowerCase?.() || null,
+    };
+  });
 
   const senderBalances = await fetchAddressTokenBalances(source, false);
   if (staticEntries.length > 0) {
@@ -757,15 +824,26 @@ export const buildSafeFlowMatrixSimulationTx = async ({
   senderBalances.forEach((row) => {
     const tokenAddress = row?.tokenAddress?.toLowerCase?.();
     if (!tokenAddress || !staticByWrapper[tokenAddress]) return;
-    const staticUnits = BigInt(row?.staticAttoCircles || row?.attoStaticCircles || row?.attoCircles || '0');
-    staticWrapperBalances[tokenAddress] = staticUnits;
-    log(`    - ${tokenAddress} (static: ${staticUnits})`);
+    const staticUnits = BigInt(row?.staticAttoCircles || row?.attoStaticCircles || '0');
+    const demurragedUnits = BigInt(row?.attoCircles || '0');
+    staticWrapperBalances[tokenAddress] = {
+      static: staticUnits,
+      demurraged: demurragedUnits,
+    };
+    if (staticWrapperDiagnostics[tokenAddress]) {
+      staticWrapperDiagnostics[tokenAddress].staticBalanceUnwrapped = staticUnits;
+      staticWrapperDiagnostics[tokenAddress].demurragedBalanceUnwrapped = demurragedUnits;
+    }
+    log(`    - ${tokenAddress} (static: ${staticUnits}, demurraged: ${demurragedUnits})`);
     if (staticUnits > 0n) {
       log(`      > Unwrapping full amount of static wrapped token: ${tokenAddress} (static: ${staticUnits})`);
       unwrapCalls.push({
         to: tokenAddress,
         data: encodeFunctionData({ abi: WRAPPER_ABI_MIN, functionName: 'unwrap', args: [staticUnits] }),
       });
+      if (staticWrapperDiagnostics[tokenAddress]) {
+        staticWrapperDiagnostics[tokenAddress].unwrapCallPlanned = true;
+      }
     }
   });
 
@@ -776,6 +854,9 @@ export const buildSafeFlowMatrixSimulationTx = async ({
       to: wrapper,
       data: encodeFunctionData({ abi: WRAPPER_ABI_MIN, functionName: 'unwrap', args: [amount] }),
     });
+    if (demurragedWrapperDiagnostics[wrapper]) {
+      demurragedWrapperDiagnostics[wrapper].unwrapCallPlanned = true;
+    }
   });
   log();
   log('Replacing wrapped token owners in the path with their real token owners...');
@@ -783,9 +864,9 @@ export const buildSafeFlowMatrixSimulationTx = async ({
   const staticSpent = {};
   const rewrittenTransfers = pathWithBigInts.transfers.map((transfer) => {
     const { info, key } = resolveTokenInfo(transfer);
-    if (!info || !isWrapperType(info.type)) return transfer;
+    if (!isWrapperInfo(info)) return transfer;
     log(` - Replacing wrapped token owner in transfer (from: ${transfer.from}, to: ${transfer.to}, tokenOwner: ${transfer.tokenOwner}) with real token owner: ${info.tokenOwner}`);
-    if (info.type === 'CrcV2_ERC20WrapperDeployed_Inflationary') {
+    if (isStaticWrapperInfo(info)) {
       const wrapperKey = (key || transfer.tokenOwner || '').toLowerCase();
       staticSpent[wrapperKey] = (staticSpent[wrapperKey] || 0n) + transfer.value;
     }
@@ -797,7 +878,12 @@ export const buildSafeFlowMatrixSimulationTx = async ({
 
   Object.entries(staticWrapperBalances).forEach(([wrapperToken, unwrappedTotal]) => {
     const spent = staticSpent[wrapperToken] || 0n;
-    const remaining = unwrappedTotal > spent ? unwrappedTotal - spent : 0n;
+    const unwrappedTotalDemurraged = unwrappedTotal.demurraged || 0n;
+    const remaining = unwrappedTotalDemurraged > spent ? unwrappedTotalDemurraged - spent : 0n;
+    if (staticWrapperDiagnostics[wrapperToken]) {
+      staticWrapperDiagnostics[wrapperToken].demurragedSpent = spent;
+      staticWrapperDiagnostics[wrapperToken].demurragedRemainingToWrap = remaining;
+    }
     log(`  - ${wrapperToken}: spent (demurraged: ${spent}), remaining to re-wrap (demurraged: ${remaining})`);
     if (remaining <= 0n) return;
 
@@ -812,6 +898,10 @@ export const buildSafeFlowMatrixSimulationTx = async ({
         args: [realTokenOwner.toLowerCase(), remaining, 1],
       }),
     });
+    if (staticWrapperDiagnostics[wrapperToken]) {
+      staticWrapperDiagnostics[wrapperToken].wrapCallPlanned = true;
+      staticWrapperDiagnostics[wrapperToken].tokenOwner = realTokenOwner.toLowerCase();
+    }
   });
 
   const flowMatrix = createFlowMatrix(source, sink, BigInt(pathWithBigInts.maxFlow), rewrittenTransfers);
@@ -841,7 +931,7 @@ export const buildSafeFlowMatrixSimulationTx = async ({
     data: encodeFunctionData({
       abi: HUB_ABI_MIN,
       functionName: 'setApprovalForAll',
-      args: [hub, true],
+      args: [source, true],
     }),
   };
 
@@ -854,6 +944,12 @@ export const buildSafeFlowMatrixSimulationTx = async ({
     functionName: 'multiSend',
     args: [packedCalls],
   });
+
+  const signature = buildPreValidatedSignature(signer);
+  const signatureBytes = hexByteLength(signature);
+  if (signatureBytes !== 65) {
+    throw new Error(`Invalid prevalidated Safe signature length: expected 65 bytes, got ${signatureBytes}.`);
+  }
 
   const safeCalldata = encodeFunctionData({
     abi: SAFE_ABI_MIN,
@@ -868,9 +964,32 @@ export const buildSafeFlowMatrixSimulationTx = async ({
       0n,
       '0x0000000000000000000000000000000000000000',
       '0x0000000000000000000000000000000000000000',
-      buildPreValidatedSignature(signer),
+      signature,
     ],
   });
+
+  const callTimeline = calls.map((call, index) => ({
+    index,
+    to: call.to,
+    label: getCallLabel(call, hub),
+    selector: (call.data || '').slice(0, 10),
+    dataLengthBytes: Math.max(0, ((call.data || '0x').length - 2) / 2),
+  }));
+
+  const staticWrapperRows = Object.values(staticWrapperDiagnostics)
+    .sort((a, b) => a.wrapper.localeCompare(b.wrapper));
+  const demurragedWrapperRows = Object.values(demurragedWrapperDiagnostics)
+    .sort((a, b) => a.wrapper.localeCompare(b.wrapper));
+
+  const wrappedEdgesByType = {
+    static: wrappedSenderEdges.filter(({ info }) => isStaticWrapperInfo(info)).length,
+    demurraged: wrappedSenderEdges.filter(({ info }) => isDemurragedWrapperInfo(info)).length,
+  };
+
+  const unwrapByType = {
+    static: staticEntries.length,
+    demurraged: demurragedEntries.length,
+  };
 
   return {
     safeAddress: source,
@@ -879,10 +998,19 @@ export const buildSafeFlowMatrixSimulationTx = async ({
     flowMatrix,
     summary: {
       wrappedEdgesFromSender: wrappedSenderEdges.length,
+      wrappedEdgesByType,
       unwrapCalls: unwrapCalls.length,
+      unwrapByType,
       wrapCalls: wrapCalls.length,
       calls: calls.length,
+      signatureBytes,
       rewrittenTransfers: rewrittenTransfers.length,
+    },
+    diagnostics: {
+      staticWrappers: staticWrapperRows,
+      demurragedWrappers: demurragedWrapperRows,
+      callTimeline,
+      callOrderDescription: 'self-approval → unwrap(s) → operateFlowMatrix → re-wrap(s)',
     },
     simulationLog: logLines.join('\n'),
   };
