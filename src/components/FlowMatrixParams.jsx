@@ -97,11 +97,18 @@ const resolveSimulationSigner = async ({ publicClient, safeAddress, connectedAdd
   const normalizedSafe = safeAddress?.toLowerCase?.();
   const normalizedConnected = connectedAddress?.toLowerCase?.();
 
-  const owners = await publicClient.readContract({
-    address: normalizedSafe,
-    abi: SAFE_OWNERS_ABI,
-    functionName: 'getOwners',
-  });
+  let owners;
+  try {
+    owners = await publicClient.readContract({
+      address: normalizedSafe,
+      abi: SAFE_OWNERS_ABI,
+      functionName: 'getOwners',
+    });
+  } catch {
+    throw new Error(
+      `Could not read Safe owners for ${normalizedSafe}. Ensure the sender address is a deployed Gnosis Safe contract.`
+    );
+  }
 
   const normalizedOwners = (owners || []).map((owner) => owner?.toLowerCase?.()).filter(Boolean);
   if (normalizedOwners.length === 0) {

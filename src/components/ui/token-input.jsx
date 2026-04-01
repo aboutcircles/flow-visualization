@@ -89,6 +89,16 @@ const TokenInput = forwardRef(({ value, onChange, placeholder, label, isExcluded
       </div>
       {tokens.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-2">
+          {tokens.length > 1 && (
+            <button
+              type="button"
+              className="flex items-center rounded-md px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 text-xs font-medium"
+              onClick={() => onChange('')}
+            >
+              Clear all ({tokens.length})
+              <X size={14} className="ml-1" />
+            </button>
+          )}
           {tokens.map((token, index) => (
             <div key={index} className={`flex items-center rounded-md px-2 py-1 ${isExcluded ? 'bg-red-100' : 'bg-gray-100'}`}>
               <span className="text-xs font-mono mr-1 truncate" style={{maxWidth: '120px'}}>

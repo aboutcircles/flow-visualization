@@ -234,6 +234,13 @@ export const useFormData = () => {
       nextErrors.Amount = 'Target flow must be a valid uint value';
     }
 
+    if (candidateFormData?.MaxTransfers) {
+      const mt = Number(candidateFormData.MaxTransfers);
+      if (!Number.isInteger(mt) || mt < 1 || mt > 500) {
+        nextErrors.MaxTransfers = 'Max transfers must be an integer between 1 and 500';
+      }
+    }
+
     const simulatedBalances = parseJsonArray(candidateFormData?.SimulatedBalances);
     if (!simulatedBalances) {
       nextErrors.SimulatedBalances = 'Simulated balances must be a valid JSON array';

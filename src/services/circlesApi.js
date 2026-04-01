@@ -114,15 +114,13 @@ export const findPath = async (formData, sdkRpc) => {
   const endpoint = formData.UseStaging ? STAGING_ENDPOINT : API_ENDPOINT;
   const rpc = formData.UseStaging ? new CirclesRpc(STAGING_ENDPOINT) : sdkRpc;
   try {
-    // Only send the active mode's token fields — include OR exclude, never both
+    // Include and exclude can coexist when quick-filter sends both
     const fromTokensArray = formData.IsFromTokensExcluded
       ? [] : parseAddressList(formData.FromTokens);
-    const excludedFromTokensArray = formData.IsFromTokensExcluded
-      ? parseAddressList(formData.ExcludedFromTokens) : [];
+    const excludedFromTokensArray = parseAddressList(formData.ExcludedFromTokens);
     const toTokensArray = formData.IsToTokensExcluded
       ? [] : parseAddressList(formData.ToTokens);
-    const excludedToTokensArray = formData.IsToTokensExcluded
-      ? parseAddressList(formData.ExcludedToTokens) : [];
+    const excludedToTokensArray = parseAddressList(formData.ExcludedToTokens);
 
     const simulatedBalances = parseJsonArray(formData.SimulatedBalances)
       .map((entry) => {
@@ -704,7 +702,8 @@ export const buildSafeFlowMatrixSimulationTx = async ({
   const source = sender.toLowerCase();
   const sink = receiver.toLowerCase();
   const normalizedSigner = signer.toLowerCase();
-  const hub = (hubAddress || HUB_ADDRESS).toLowerCase();
+  if (!hubAddress) throw new Error('Hub contract address is required for simulation.');
+  const hub = hubAddress.toLowerCase();
   const logLines = [];
   const log = (line = '') => {
     logLines.push(line);
@@ -846,6 +845,12 @@ export const buildSafeFlowMatrixSimulationTx = async ({
       }
     }
   });
+
+  for (const [wrapper] of staticEntries) {
+    if (!staticWrapperBalances[wrapper]) {
+      log(`  WARNING: No balance found for static wrapper ${wrapper} — unwrap cannot be planned. Simulation will likely revert.`);
+    }
+  }
 
   Object.entries(demurragedByWrapper).forEach(([wrapper, amount]) => {
     if (amount <= 0n) return;

@@ -358,21 +358,21 @@ const PathFinderForm = ({
           />
           <InfoTip text={`Prod: rpc.aboutcircles.com\nStaging: staging.circlesubi.network\n\nCurrently using: ${formData.UseStaging ? 'staging.circlesubi.network' : 'rpc.aboutcircles.com'}`} />
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center opacity-40 pointer-events-none" title="Not yet supported by SDK">
           <ToggleSwitch
             isEnabled={formData.QuantizedMode}
             onToggle={handleQuantizedModeToggle}
             label="Quantized Mode"
           />
-          <InfoTip text="Enable 96 CRC quantization semantics in the pathfinder." />
+          <InfoTip text="Not yet supported — awaiting SDK update. Will enable 96 CRC quantization semantics." />
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center opacity-40 pointer-events-none" title="Not yet supported by SDK">
           <ToggleSwitch
             isEnabled={formData.DebugShowIntermediateSteps}
             onToggle={handleDebugIntermediateToggle}
             label="Debug Intermediate Steps"
           />
-          <InfoTip text="Request intermediate debug details from pathfinder when supported by the backend." />
+          <InfoTip text="Not yet supported — awaiting SDK update. Will request intermediate debug details from pathfinder." />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Max Transfers</label>
@@ -391,31 +391,29 @@ const PathFinderForm = ({
           </label>
           <div className="rounded-md border border-input p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-gray-500">
                 Balances: {parsedSimulatedBalances.length} · Trusts: {parsedSimulatedTrusts.length}
               </div>
               <Button type="button" onClick={openSimulationEditor}>Edit simulations</Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Use the popup grid editor to manage rows. Data is stored as canonical JSON arrays in form state.
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Consented avatars can also be edited in the same popup.
+            <p className="text-xs text-gray-500">
+              Edit simulated balances and trusts for hypothetical pathfinding scenarios.
             </p>
           </div>
           {formErrors?.SimulatedBalances && <p className="text-xs text-red-600">{formErrors.SimulatedBalances}</p>}
           {formErrors?.SimulatedTrusts && <p className="text-xs text-red-600">{formErrors.SimulatedTrusts}</p>}
         </div>
-        <div>
+        <div className="opacity-40 pointer-events-none" title="Not yet supported by SDK">
           <label className="block text-sm font-medium mb-1">
             Simulated Consented Avatars
-            <InfoTip text='Comma/space separated avatar addresses.' />
+            <InfoTip text='Not yet supported — awaiting SDK update. Will accept comma/space separated avatar addresses.' />
           </label>
           <Input
             name="SimulatedConsentedAvatars"
             value={formData.SimulatedConsentedAvatars}
             onChange={handleInputChange}
             placeholder="0x...,0x..."
+            disabled
           />
           {formErrors?.SimulatedConsentedAvatars && <p className="mt-1 text-xs text-red-600">{formErrors.SimulatedConsentedAvatars}</p>}
         </div>
@@ -490,12 +488,12 @@ const PathFinderForm = ({
             }}
           >
             <div className="mx-auto flex h-full w-full max-w-[1440px] items-center justify-center">
-              <div className="flex h-[min(900px,calc(100vh-2rem))] w-full flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl sm:h-[min(900px,calc(100vh-3rem))]">
-                <div className="flex items-start justify-between gap-4 border-b bg-muted/30 px-5 py-4">
+              <div className="flex h-[min(900px,calc(100vh-2rem))] w-full flex-col overflow-hidden rounded-2xl border bg-white shadow-2xl sm:h-[min(900px,calc(100vh-3rem))]">
+                <div className="flex items-start justify-between gap-4 border-b bg-gray-50 px-5 py-4">
                   <div className="space-y-1">
                     <h3 id="simulation-editor-title" className="text-base font-semibold tracking-tight">Simulation Editor</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Edit simulated balances, trusts, and consented avatars in a structured data grid.
+                    <p className="text-xs text-gray-500">
+                      Edit simulated balances and trusts in a structured data grid.
                     </p>
                   </div>
                   <Button type="button" className="h-8 px-3" onClick={closeSimulationEditor}>Close</Button>
@@ -503,13 +501,13 @@ const PathFinderForm = ({
 
                 <div className="flex-1 overflow-y-auto p-4 sm:p-5">
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-                    <div className="overflow-hidden rounded-xl border bg-card">
+                    <div className="overflow-hidden rounded-xl border bg-white">
                       <div className="flex items-center justify-between border-b px-4 py-3">
                         <h4 className="text-sm font-semibold">Simulated Balances</h4>
                         <Button type="button" className="h-8 px-3" onClick={appendEmptyBalanceRow}>Add row</Button>
                       </div>
                       <div className="space-y-3 p-4">
-                        <div className="grid grid-cols-[1fr_1fr_1fr_88px_72px_86px] gap-2 rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <div className="grid grid-cols-[1fr_1fr_1fr_60px_52px_64px] gap-2 rounded-md border bg-gray-100 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                           <span>holder</span>
                           <span>token</span>
                           <span>amount</span>
@@ -519,15 +517,15 @@ const PathFinderForm = ({
                         </div>
                         <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-1">
                           {simulationBalanceRows.map((row, index) => (
-                            <div key={`balance-row-${index}`} className="grid grid-cols-[1fr_1fr_1fr_88px_72px_86px] gap-2 rounded-md border border-transparent bg-muted/10 p-1.5 hover:border-border hover:bg-muted/20">
+                            <div key={`balance-row-${index}`} className="grid grid-cols-[1fr_1fr_1fr_60px_52px_64px] gap-2 rounded-md border border-transparent bg-gray-50/50 p-1.5 hover:border-gray-200 hover:bg-gray-50">
                               <Input value={row.holder} onChange={(event) => updateBalanceRow(index, 'holder', event.target.value)} placeholder="0xholder" className="h-8 font-mono text-xs" />
                               <Input value={row.token} onChange={(event) => updateBalanceRow(index, 'token', event.target.value)} placeholder="0xtoken" className="h-8 font-mono text-xs" />
                               <Input value={row.amount} onChange={(event) => updateBalanceRow(index, 'amount', event.target.value)} placeholder="1000000000000000000" className="h-8 font-mono text-xs" />
-                              <label className="flex h-8 items-center justify-center gap-1 rounded-md border bg-background px-2 text-[11px] font-medium">
+                              <label className="flex h-8 items-center justify-center gap-1 rounded-md border bg-white px-2 text-[11px] font-medium">
                                 <input type="checkbox" checked={Boolean(row.isWrapped)} onChange={(event) => updateBalanceRow(index, 'isWrapped', event.target.checked)} />
                                 yes
                               </label>
-                              <label className="flex h-8 items-center justify-center gap-1 rounded-md border bg-background px-2 text-[11px] font-medium">
+                              <label className="flex h-8 items-center justify-center gap-1 rounded-md border bg-white px-2 text-[11px] font-medium">
                                 <input type="checkbox" checked={Boolean(row.isStatic)} onChange={(event) => updateBalanceRow(index, 'isStatic', event.target.checked)} />
                                 yes
                               </label>
@@ -535,60 +533,60 @@ const PathFinderForm = ({
                             </div>
                           ))}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">One editable row per simulated balance.</p>
+                        <p className="text-[11px] text-gray-500">One editable row per simulated balance.</p>
                       </div>
                     </div>
 
-                    <div className="overflow-hidden rounded-xl border bg-card">
+                    <div className="overflow-hidden rounded-xl border bg-white">
                       <div className="flex items-center justify-between border-b px-4 py-3">
                         <h4 className="text-sm font-semibold">Simulated Trusts</h4>
                         <Button type="button" className="h-8 px-3" onClick={appendEmptyTrustRow}>Add row</Button>
                       </div>
                       <div className="space-y-3 p-4">
-                        <div className="grid grid-cols-[1fr_1fr_86px] gap-2 rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <div className="grid grid-cols-[1fr_1fr_86px] gap-2 rounded-md border bg-gray-100 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                           <span>truster</span>
                           <span>trustee</span>
                           <span className="text-right">action</span>
                         </div>
                         <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-1">
                           {simulationTrustRows.map((row, index) => (
-                            <div key={`trust-row-${index}`} className="grid grid-cols-[1fr_1fr_86px] gap-2 rounded-md border border-transparent bg-muted/10 p-1.5 hover:border-border hover:bg-muted/20">
+                            <div key={`trust-row-${index}`} className="grid grid-cols-[1fr_1fr_86px] gap-2 rounded-md border border-transparent bg-gray-50/50 p-1.5 hover:border-gray-200 hover:bg-gray-50">
                               <Input value={row.truster} onChange={(event) => updateTrustRow(index, 'truster', event.target.value)} placeholder="0xtruster" className="h-8 font-mono text-xs" />
                               <Input value={row.trustee} onChange={(event) => updateTrustRow(index, 'trustee', event.target.value)} placeholder="0xtrustee" className="h-8 font-mono text-xs" />
                               <Button type="button" className="h-8 px-2 text-xs" onClick={() => removeTrustRow(index)}>Remove</Button>
                             </div>
                           ))}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">One editable row per trust edge.</p>
+                        <p className="text-[11px] text-gray-500">One editable row per trust edge.</p>
                       </div>
                     </div>
 
-                    <div className="overflow-hidden rounded-xl border bg-card">
+                    <div className="overflow-hidden rounded-xl border bg-white opacity-40 pointer-events-none">
                       <div className="flex items-center justify-between border-b px-4 py-3">
-                        <h4 className="text-sm font-semibold">Simulated Consented Avatars</h4>
+                        <h4 className="text-sm font-semibold">Simulated Consented Avatars <span className="text-xs font-normal text-gray-500">(not yet supported by SDK)</span></h4>
                         <Button type="button" className="h-8 px-3" onClick={appendEmptyConsentedRow}>Add row</Button>
                       </div>
                       <div className="space-y-3 p-4">
-                        <div className="grid grid-cols-[1fr_86px] gap-2 rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <div className="grid grid-cols-[1fr_86px] gap-2 rounded-md border bg-gray-100 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                           <span>avatar</span>
                           <span className="text-right">action</span>
                         </div>
                         <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-1">
                           {simulationConsentedRows.map((row, index) => (
-                            <div key={`consented-row-${index}`} className="grid grid-cols-[1fr_86px] gap-2 rounded-md border border-transparent bg-muted/10 p-1.5 hover:border-border hover:bg-muted/20">
+                            <div key={`consented-row-${index}`} className="grid grid-cols-[1fr_86px] gap-2 rounded-md border border-transparent bg-gray-50/50 p-1.5 hover:border-gray-200 hover:bg-gray-50">
                               <Input value={row} onChange={(event) => updateConsentedRow(index, event.target.value)} placeholder="0xavatar" className="h-8 font-mono text-xs" />
                               <Button type="button" className="h-8 px-2 text-xs" onClick={() => removeConsentedRow(index)}>Remove</Button>
                             </div>
                           ))}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">One editable row per consented avatar.</p>
+                        <p className="text-[11px] text-gray-500">One editable row per consented avatar.</p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-5 py-3">
-                  <div className="text-xs text-muted-foreground">Shortcuts: Ctrl/Cmd+Enter = Apply, Esc = Cancel</div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-gray-50 px-5 py-3">
+                  <div className="text-xs text-gray-500">Shortcuts: Ctrl/Cmd+Enter = Apply, Esc = Cancel</div>
                   <div className="flex items-center gap-2">
                     <Button type="button" className="h-8 px-3" onClick={normalizeSimulationGridText}>Normalize</Button>
                     <Button type="button" className="h-8 px-3" onClick={() => { setSimulationBalanceRows([]); setSimulationTrustRows([]); setSimulationConsentedRows([]); }}>Clear</Button>

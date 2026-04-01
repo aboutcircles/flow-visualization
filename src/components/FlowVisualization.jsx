@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, GripHorizontal, User, Hash } from 'lucide-react';
+import InfoTip from '@/components/ui/info-tip';
 import PathStats from '@/components/PathStats';
 
 const FlowVisualization = () => {
@@ -27,8 +28,7 @@ const FlowVisualization = () => {
   const [sourceBalancesHeight, setSourceBalancesHeight] = usePersistedState('source-balances-height', 260);
   const [visualizationMode, setVisualizationMode] = usePersistedState('viz-mode', 'graph');
   const [showNames, setShowNames] = usePersistedState('show-names', true);
-  const [quickFromFilterEnabled, setQuickFromFilterEnabled] = usePersistedState('quick-from-filter-enabled', false);
-  const [quickToFilterEnabled, setQuickToFilterEnabled] = usePersistedState('quick-to-filter-enabled', false);
+  const [quickFilterEnabled, setQuickFilterEnabled] = usePersistedState('quick-filter-enabled', false);
   const [sourceBalanceSort, setSourceBalanceSort] = usePersistedState('source-balance-sort', { key: 'crc', direction: 'desc' });
   const [lowerPanelTab, setLowerPanelTab] = usePersistedState('lower-panel-tab', 'source');
   // selectedTransfers removed — route-based selection via selectedRouteIds
@@ -341,25 +341,32 @@ const FlowVisualization = () => {
   }, [loadPathData, clearHighlights]);
 
   const selectQuickTokensByPredicate = useCallback(async (predicate) => {
-    const nextTokens = Array.from(new Set(
+    const allTokens = Array.from(new Set(
+      (sourceBalances || [])
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const selectedTokens = Array.from(new Set(
       (sourceBalances || [])
         .filter(predicate)
         .map((row) => row?.tokenAddress?.toLowerCase())
         .filter(Boolean)
     ));
-    const nextFromTokens = nextTokens.join(',');
+    const nextFromTokens = selectedTokens.join(',');
+    const excludedTokens = allTokens.filter(t => !selectedTokens.includes(t));
+    const nextExcludedFromTokens = excludedTokens.join(',');
 
     setFromTokensIncludeValue(nextFromTokens);
 
-    if (quickFromFilterEnabled) {
+    if (quickFilterEnabled) {
       await executeFindPath({
         ...formData,
         FromTokens: nextFromTokens,
-        ExcludedFromTokens: '',
+        ExcludedFromTokens: nextExcludedFromTokens,
         IsFromTokensExcluded: false,
       });
     }
-  }, [sourceBalances, setFromTokensIncludeValue, quickFromFilterEnabled, executeFindPath, formData]);
+  }, [sourceBalances, setFromTokensIncludeValue, quickFilterEnabled, executeFindPath, formData]);
 
   const selectAllQuickTokens = useCallback(async () => {
     await selectQuickTokensByPredicate(() => true);
@@ -412,6 +419,17 @@ const FlowVisualization = () => {
     await executeFindPath(baseData);
   }, [formData, executeFindPath, validateFormData]);
 
+  // Auto-run findPath on mount if form has sufficient persisted values
+  const hasAutoRun = useRef(false);
+  useEffect(() => {
+    if (hasAutoRun.current) return;
+    const isAddress = (v) => typeof v === 'string' && /^0x[a-fA-F0-9]{40}$/.test(v.trim());
+    if (isAddress(formData.From) && isAddress(formData.To) && formData.Amount && formData.Amount !== '0') {
+      hasAutoRun.current = true;
+      handleFindPath();
+    }
+  }, [formData.From, formData.To, formData.Amount, handleFindPath]);
+
   const noPathSuggestions = useMemo(() => {
     if (!pathData) return [];
     const hasNoPath = String(pathData?.maxFlow || '0') === '0' && (pathData?.transfers?.length || 0) === 0;
@@ -439,33 +457,42 @@ const FlowVisualization = () => {
       : [...normalizedFromTokens, normalized];
     const nextFromTokens = nextTokens.join(',');
 
+    const allTokens = Array.from(new Set(
+      (sourceBalances || [])
+        .map((row) => row?.tokenAddress?.toLowerCase())
+        .filter(Boolean)
+    ));
+    const excludedTokens = allTokens.filter(t => !nextTokens.includes(t));
+    const nextExcludedFromTokens = excludedTokens.join(',');
+
     setFromTokensIncludeValue(nextFromTokens);
 
-    if (quickFromFilterEnabled) {
+    if (quickFilterEnabled) {
       await executeFindPath({
         ...formData,
         FromTokens: nextFromTokens,
-        ExcludedFromTokens: '',
+        ExcludedFromTokens: nextExcludedFromTokens,
         IsFromTokensExcluded: false,
       });
     }
   }, [
     normalizedFromTokens,
+    sourceBalances,
     setFromTokensIncludeValue,
-    quickFromFilterEnabled,
+    quickFilterEnabled,
     executeFindPath,
     formData,
   ]);
 
   const toggleQuickFilterEnabled = useCallback(async () => {
-    const nextEnabled = !quickFromFilterEnabled;
-    setQuickFromFilterEnabled(nextEnabled);
+    const nextEnabled = !quickFilterEnabled;
+    setQuickFilterEnabled(nextEnabled);
     if (nextEnabled) {
       await executeFindPath(formData);
     }
   }, [
-    quickFromFilterEnabled,
-    setQuickFromFilterEnabled,
+    quickFilterEnabled,
+    setQuickFilterEnabled,
     executeFindPath,
     formData,
   ]);
@@ -486,7 +513,7 @@ const FlowVisualization = () => {
 
     setToTokensIncludeValue(nextToTokens);
 
-    if (quickToFilterEnabled) {
+    if (quickFilterEnabled) {
       await executeFindPath({
         ...formData,
         ToTokens: nextToTokens,
@@ -494,7 +521,7 @@ const FlowVisualization = () => {
         IsToTokensExcluded: false,
       });
     }
-  }, [sinkTrustRows, setToTokensIncludeValue, quickToFilterEnabled, executeFindPath, formData]);
+  }, [sinkTrustRows, setToTokensIncludeValue, quickFilterEnabled, executeFindPath, formData]);
 
   const toggleSelectAllSinkQuickTokens = useCallback(async () => {
     const allTokenAddresses = Array.from(new Set(
@@ -518,7 +545,7 @@ const FlowVisualization = () => {
 
     setToTokensIncludeValue(nextToTokens);
 
-    if (quickToFilterEnabled) {
+    if (quickFilterEnabled) {
       await executeFindPath({
         ...formData,
         ToTokens: nextToTokens,
@@ -529,27 +556,14 @@ const FlowVisualization = () => {
   }, [
     normalizedToTokens,
     setToTokensIncludeValue,
-    quickToFilterEnabled,
-    executeFindPath,
-    formData,
-  ]);
-
-  const toggleQuickToFilterEnabled = useCallback(async () => {
-    const nextEnabled = !quickToFilterEnabled;
-    setQuickToFilterEnabled(nextEnabled);
-    if (nextEnabled) {
-      await executeFindPath(formData);
-    }
-  }, [
-    quickToFilterEnabled,
-    setQuickToFilterEnabled,
+    quickFilterEnabled,
     executeFindPath,
     formData,
   ]);
 
   const clearQuickFilterSelection = useCallback(async () => {
     setFromTokensIncludeValue('');
-    if (quickFromFilterEnabled) {
+    if (quickFilterEnabled) {
       await executeFindPath({
         ...formData,
         FromTokens: '',
@@ -559,7 +573,7 @@ const FlowVisualization = () => {
     }
   }, [
     setFromTokensIncludeValue,
-    quickFromFilterEnabled,
+    quickFilterEnabled,
     executeFindPath,
     formData,
   ]);
@@ -1078,6 +1092,7 @@ const FlowVisualization = () => {
                                 className="text-xs"
                               >
                                 Source balances ({sortedSourceBalances.length})
+                                <InfoTip text="Tokens the sender holds. Select tokens to constrain which ones the pathfinder can spend (first hop)." size={12} />
                               </TabsTrigger>
                               <TabsTrigger
                                 isActive={lowerPanelTab === 'sink'}
@@ -1085,6 +1100,7 @@ const FlowVisualization = () => {
                                 className="text-xs"
                               >
                                 Sink trust ({sinkTrustRows.length})
+                                <InfoTip text="Avatars the receiver trusts. Select to constrain which token owners the receiver accepts (last hop). Independent from source balances — intermediaries bridge trust gaps." size={12} />
                               </TabsTrigger>
                             </TabsList>
                           </div>
@@ -1096,13 +1112,14 @@ const FlowVisualization = () => {
                                   <button
                                     type="button"
                                     onClick={toggleQuickFilterEnabled}
+                                    title="When ON, selecting tokens automatically re-runs pathfinding with the current selection"
                                     className={`text-xs px-2 py-1 rounded border ${
-                                      quickFromFilterEnabled
+                                      quickFilterEnabled
                                         ? 'bg-blue-600 text-white border-blue-600'
                                         : 'bg-gray-100 text-gray-700 border-gray-300'
                                     }`}
                                   >
-                                    Quick filter {quickFromFilterEnabled ? 'ON' : 'OFF'}
+                                    Auto-search {quickFilterEnabled ? 'ON' : 'OFF'}
                                   </button>
                                   <span className="text-xs text-gray-500">
                                     {normalizedFromTokens.length} selected
@@ -1174,14 +1191,15 @@ const FlowVisualization = () => {
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <button
                                     type="button"
-                                    onClick={toggleQuickToFilterEnabled}
+                                    onClick={toggleQuickFilterEnabled}
+                                    title="When ON, selecting tokens automatically re-runs pathfinding with the current selection"
                                     className={`text-xs px-2 py-1 rounded border ${
-                                      quickToFilterEnabled
+                                      quickFilterEnabled
                                         ? 'bg-blue-600 text-white border-blue-600'
                                         : 'bg-gray-100 text-gray-700 border-gray-300'
                                     }`}
                                   >
-                                    Quick filter {quickToFilterEnabled ? 'ON' : 'OFF'}
+                                    Auto-search {quickFilterEnabled ? 'ON' : 'OFF'}
                                   </button>
                                   <span className="text-xs text-gray-500">{normalizedToTokens.length} selected</span>
                                 </div>
