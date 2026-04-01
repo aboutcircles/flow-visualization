@@ -30,14 +30,20 @@ export const useCytoscape = ({
   const cyRef = useRef(null);
   const isInitializingRef = useRef(false);
   const onNodeRemoveRef = useRef(onNodeRemove);
+  const nodeProfilesRef = useRef(nodeProfiles);
+  const tokenOwnerProfilesRef = useRef(tokenOwnerProfiles);
+  const balancesByAccountRef = useRef(balancesByAccount);
   onNodeRemoveRef.current = onNodeRemove;
+  nodeProfilesRef.current = nodeProfiles;
+  tokenOwnerProfilesRef.current = tokenOwnerProfiles;
+  balancesByAccountRef.current = balancesByAccount;
   const { config, updateStats } = usePerformance();
   const normalizeAddress = (value) => (typeof value === 'string' ? value.toLowerCase() : '');
   const getBalanceEntryForTransfer = (data) => {
     const srcAddr = normalizeAddress(data?.source);
     if (!srcAddr) return null;
 
-    const balanceMap = balancesByAccount[srcAddr] || {};
+    const balanceMap = balancesByAccountRef.current[srcAddr] || {};
     const candidates = [
       data?.tokenAddress,
       data?.tokenOwner,
@@ -343,10 +349,13 @@ export const useCytoscape = ({
       styles.push({
         selector: '.highlighted',
         style: {
-          'line-color': '#2563EB',
-          'target-arrow-color': '#2563EB',
+          // Keep original edge color/gradient (important for Ultra "usage bar")
+          // and add emphasis via thickness + overlay only.
           'width': 3,
-          'z-index': 999
+          'z-index': 999,
+          'overlay-opacity': 0.25,
+          'overlay-color': '#2563EB',
+          'overlay-padding': 2
         }
       });
 
@@ -502,8 +511,8 @@ export const useCytoscape = ({
             const node = event.target;
             const position = event.renderedPosition;
             const addr = node.id();
-            const profile = nodeProfiles[addr];
-            const balanceMap = balancesByAccount[addr] || {};
+            const profile = nodeProfilesRef.current[addr];
+            const balanceMap = balancesByAccountRef.current[addr] || {};
             const totalCrc = Object.values(balanceMap).reduce((sum, e) => sum + (e.crc || 0), 0);
             
             let tooltipText = '';
@@ -545,7 +554,7 @@ export const useCytoscape = ({
             }
             
             if (data.tokenOwner) {
-              const tokenProfile = tokenOwnerProfiles[data.tokenOwner];
+              const tokenProfile = tokenOwnerProfilesRef.current[data.tokenOwner];
               if (tokenProfile?.name) {
                 tooltipText += `Token Owner: ${tokenProfile.name}\n`;
               }
@@ -646,7 +655,7 @@ export const useCytoscape = ({
       isInitializingRef.current = false;
     }
 
-  }, [pathData, rawPathData, formData, wrappedTokens, tokenInfo, edgeCatalogByIndex, config.rendering.features, config.rendering.fastMode, updateStats, nodeProfiles, tokenOwnerProfiles, balancesByAccount, onTooltip, onTransactionSelect, layoutName]);
+  }, [pathData, rawPathData, formData, wrappedTokens, tokenInfo, edgeCatalogByIndex, config.rendering.features, config.rendering.fastMode, updateStats, onTooltip, onTransactionSelect]);
 
   // Update edge styles when config changes
   useEffect(() => {
@@ -774,7 +783,7 @@ export const useCytoscape = ({
         }
       });
     });
-  }, [balancesByAccount, config.rendering.features]);
+  }, [pathData, balancesByAccount, config.rendering.features]);
 
   // Edge filtering removed — slider now drives transfer selection upstream,
   // which changes the pathData prop, causing graph re-render with filtered data.

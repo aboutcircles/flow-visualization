@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Copy, Check, Code, ChevronDown, ChevronUp, Wallet, Send, X, AlertTriangle } from "lucide-react";
 import { createFlowMatrix } from "@aboutcircles/sdk-pathfinder";
 import { encodeFunctionData } from "viem";
-import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from "wagmi";
 import { gnosis } from "wagmi/chains";
 import { HUB_ADDRESS } from "@/config/wagmi";
+import { buildSafeFlowMatrixSimulationTx } from "@/services/circlesApi";
 
 // Just the operateFlowMatrix function ABI
 const OPERATE_FLOW_MATRIX_ABI = [
@@ -72,18 +73,78 @@ const OPERATE_FLOW_MATRIX_ABI = [
 
 const HUB_V2_ADDRESS = '0xc12C1E50ABB450d6205Ea2C3Fa861b3B834d13e8';
 
+const SAFE_OWNERS_ABI = [
+  {
+    type: 'function',
+    name: 'getOwners',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address[]' }],
+  },
+];
+
 function bytesToHex(bytes) {
   return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltered }) => {
+const toDisplayValue = (value) => {
+  if (typeof value === 'bigint') return value.toString();
+  if (value === null || value === undefined) return '—';
+  return String(value);
+};
+
+const resolveSimulationSigner = async ({ publicClient, safeAddress, connectedAddress }) => {
+  const normalizedSafe = safeAddress?.toLowerCase?.();
+  const normalizedConnected = connectedAddress?.toLowerCase?.();
+
+  let owners;
+  try {
+    owners = await publicClient.readContract({
+      address: normalizedSafe,
+      abi: SAFE_OWNERS_ABI,
+      functionName: 'getOwners',
+    });
+  } catch {
+    throw new Error(
+      `Could not read Safe owners for ${normalizedSafe}. Ensure the sender address is a deployed Gnosis Safe contract.`
+    );
+  }
+
+  const normalizedOwners = (owners || []).map((owner) => owner?.toLowerCase?.()).filter(Boolean);
+  if (normalizedOwners.length === 0) {
+    throw new Error(`No Safe owners found for sender safe ${normalizedSafe}.`);
+  }
+
+  if (normalizedConnected && normalizedOwners.includes(normalizedConnected)) {
+    return {
+      signer: normalizedConnected,
+      owners: normalizedOwners,
+      usesConnectedWallet: true,
+    };
+  }
+
+  return {
+    signer: normalizedOwners[0],
+    owners: normalizedOwners,
+    usesConnectedWallet: false,
+  };
+};
+
+const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcessed, isFiltered, view = 'all' }) => {
+  const showParamsSection = view !== 'simulation';
+  const showSimulationSection = view !== 'params';
   const [flowMatrix, setFlowMatrix] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState({ json: false, calldata: false });
   const [expanded, setExpanded] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simulationError, setSimulationError] = useState(null);
+  const [simulationErrorLog, setSimulationErrorLog] = useState('');
+  const [simulationResult, setSimulationResult] = useState(null);
 
   const { address, isConnected, chain } = useAccount();
+  const publicClient = usePublicClient();
   const { connectors, connect } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
@@ -93,6 +154,12 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
   });
 
   useEffect(() => {
+    if (!showParamsSection) {
+      setFlowMatrix(null);
+      setError(null);
+      return;
+    }
+
     if (!pathData || !sender) return;
     setError(null);
 
@@ -113,7 +180,7 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
       setError(err.message);
       setFlowMatrix(null);
     }
-  }, [pathData, sender, receiver]);
+  }, [pathData, sender, receiver, showParamsSection]);
 
   useEffect(() => {
     if (writeError) {
@@ -247,7 +314,90 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
     }
   };
 
-  if (error) {
+  const handleSimulateTransaction = async () => {
+    const simulationPathData = rawPathData || pathData;
+    if (!simulationPathData || !sender || !receiver || !address || !publicClient) return;
+
+    setSimulationError(null);
+    setSimulationErrorLog('');
+    setSimulationResult(null);
+    setIsSimulating(true);
+    let lastSimulationLog = '';
+
+    try {
+      const signerSelection = await resolveSimulationSigner({
+        publicClient,
+        safeAddress: sender,
+        connectedAddress: address,
+      });
+
+      const buildSimulationTx = () => buildSafeFlowMatrixSimulationTx({
+        pathData: simulationPathData,
+        sender,
+        receiver,
+        signer: signerSelection.signer,
+        hubAddress: HUB_ADDRESS,
+      });
+
+      const simulationTx = await buildSimulationTx();
+      lastSimulationLog = simulationTx?.simulationLog || '';
+
+      console.groupCollapsed('[FlowMatrix] Safe simulation');
+      console.info('Simulation context', {
+        sender: sender?.toLowerCase?.(),
+        receiver: receiver?.toLowerCase?.(),
+        connectedWallet: address?.toLowerCase?.(),
+        simulationSigner: signerSelection.signer,
+        safeOwners: signerSelection.owners,
+        signerSelection: signerSelection.usesConnectedWallet
+          ? 'connected wallet is a Safe owner'
+          : 'connected wallet is not a Safe owner; using first Safe owner',
+        safeAddress: simulationTx.safeAddress,
+        gasFrom: simulationTx.gasFrom,
+      });
+      if (simulationTx.simulationLog) {
+        console.log(simulationTx.simulationLog);
+      }
+
+      const gas = await publicClient.estimateGas({
+        account: simulationTx.gasFrom,
+        to: simulationTx.safeAddress,
+        data: simulationTx.safeCalldata,
+      });
+
+      console.info('Estimated gas', gas.toString());
+      console.groupEnd();
+
+      if (gas === 0n) {
+        throw new Error('Gas estimation returned 0 – path likely too long for a single block.');
+      }
+
+      setSimulationResult({
+        gas,
+        ...simulationTx.summary,
+        diagnostics: simulationTx.diagnostics,
+        simulationLog: simulationTx.simulationLog,
+      });
+    } catch (err) {
+      console.error('[FlowMatrix] Safe simulation failed', err);
+      if (console.groupEnd) {
+        try {
+          console.groupEnd();
+        } catch {
+          // no-op
+        }
+      }
+      setSimulationError(err?.shortMessage || err?.message || 'Simulation failed');
+      setSimulationErrorLog(
+        lastSimulationLog ||
+        ((typeof err?.simulationLog === 'string' && err.simulationLog) || '')
+      );
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  if (error && showParamsSection) {
     return (
       <Card className="mt-4">
         <CardContent className="pt-4">
@@ -257,22 +407,26 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
     );
   }
 
-  if (!flowMatrix) return null;
+  if (showParamsSection && !flowMatrix) return null;
 
-  const params = getJsonParams();
-  const shortParams = {
-    ...params,
-    _flowVertices: params._flowVertices.length > 3 ? [...params._flowVertices.slice(0, 3), "..."] : params._flowVertices,
-    _flow: params._flow.length > 3 ? [...params._flow.slice(0, 3), "..."] : params._flow,
-  };
+  const params = showParamsSection ? getJsonParams() : null;
+  const shortParams = showParamsSection && params
+    ? {
+        ...params,
+        _flowVertices: params._flowVertices.length > 3 ? [...params._flowVertices.slice(0, 3), "..."] : params._flowVertices,
+        _flow: params._flow.length > 3 ? [...params._flow.slice(0, 3), "..."] : params._flow,
+      }
+    : null;
 
-  const formattedJson = expanded
+  const formattedJson = showParamsSection
+    ? (expanded
     ? JSON.stringify({ method: "operateFlowMatrix", params }, null, 2)
-    : JSON.stringify({ method: "operateFlowMatrix", params: shortParams }, null, 2);
+    : JSON.stringify({ method: "operateFlowMatrix", params: shortParams }, null, 2))
+    : null;
 
   let calldata = null;
   try {
-    calldata = getCalldata();
+    calldata = showParamsSection ? getCalldata() : null;
   } catch (err) {
     // will show error inline
   }
@@ -298,35 +452,41 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
           <div className="flex items-center gap-2">
             <Code size={18} className="text-blue-500" />
             <h2 className="text-lg font-semibold">
-              operateFlowMatrix
+              {showSimulationSection && !showParamsSection ? 'Flow Matrix Simulation' : 'operateFlowMatrix'}
             </h2>
-            <span className="text-xs text-gray-400 font-mono">{HUB_V2_ADDRESS.slice(0, 10)}…</span>
+            {showParamsSection && (
+              <span className="text-xs text-gray-400 font-mono">{HUB_V2_ADDRESS.slice(0, 10)}…</span>
+            )}
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Button
-              onClick={() => setExpanded(!expanded)}
-              variant="outline"
-              className="flex items-center gap-1"
-            >
-              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              {expanded ? "Less" : "Full"}
-            </Button>
-            <Button
-              onClick={() => copyToClipboard("json")}
-              variant="outline"
-              className="flex items-center gap-1"
-            >
-              {copied.json ? <Check size={16} /> : <Copy size={16} />}
-              {copied.json ? "Copied!" : "JSON"}
-            </Button>
-            <Button
-              onClick={() => copyToClipboard("calldata")}
-              variant="outline"
-              className="flex items-center gap-1"
-            >
-              {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
-              {copied.calldata ? "Copied!" : "Calldata"}
-            </Button>
+            {showParamsSection && (
+              <>
+                <Button
+                  onClick={() => setExpanded(!expanded)}
+                  variant="outline"
+                  className="flex items-center gap-1"
+                >
+                  {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  {expanded ? "Less" : "Full"}
+                </Button>
+                <Button
+                  onClick={() => copyToClipboard("json")}
+                  variant="outline"
+                  className="flex items-center gap-1"
+                >
+                  {copied.json ? <Check size={16} /> : <Copy size={16} />}
+                  {copied.json ? "Copied!" : "JSON"}
+                </Button>
+                <Button
+                  onClick={() => copyToClipboard("calldata")}
+                  variant="outline"
+                  className="flex items-center gap-1"
+                >
+                  {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
+                  {copied.calldata ? "Copied!" : "Calldata"}
+                </Button>
+              </>
+            )}
             {!isConnected ? (
               <Button
                 onClick={() => setShowWalletModal(true)}
@@ -345,13 +505,25 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
                     Switch to Gnosis Chain
                   </Button>
                 ) : (
+                  showParamsSection && (
+                    <Button
+                      onClick={handleExecuteTransaction}
+                      disabled={!canExecute}
+                      className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
+                    >
+                      <Send size={16} />
+                      {isWritePending || isConfirming ? "Executing..." : isConfirmed ? "Transaction Confirmed!" : "Execute Transaction"}
+                    </Button>
+                  )
+                )}
+                {showSimulationSection && (
                   <Button
-                    onClick={handleExecuteTransaction}
-                    disabled={!canExecute}
-                    className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
+                    onClick={handleSimulateTransaction}
+                    disabled={!isConnected || isWrongChain || isSimulating}
+                    variant="outline"
+                    className="flex items-center gap-1"
                   >
-                    <Send size={16} />
-                    {isWritePending || isConfirming ? "Executing..." : isConfirmed ? "Transaction Confirmed!" : "Execute Transaction"}
+                    {isSimulating ? 'Simulating…' : 'Simulate'}
                   </Button>
                 )}
                 <Button
@@ -387,12 +559,145 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
           </div>
         )}
 
-        <div className="relative">
-          <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-96 font-mono text-sm">
-            <pre className="whitespace-pre-wrap text-left">{formattedJson}</pre>
+        {showSimulationSection && simulationError && (
+          <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm space-y-2">
+            <div>Simulation error: {simulationError}</div>
+            {simulationErrorLog && (
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-red-800">Simulation log (until error)</div>
+                <pre className="mt-1 max-h-64 overflow-auto rounded border border-red-200 bg-white/70 p-2 font-mono text-xs text-red-900 whitespace-pre-wrap text-left">
+                  {simulationErrorLog}
+                </pre>
+              </div>
+            )}
           </div>
-        </div>
-        {calldata && (
+        )}
+
+        {showSimulationSection && simulationResult && (
+          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-900 space-y-1">
+            <div className="font-medium">Safe simulation</div>
+            <div>Estimated gas: {simulationResult.gas.toString()}</div>
+            <div>Wrapped sender edges: {simulationResult.wrappedEdgesFromSender}</div>
+            {simulationResult.wrappedEdgesByType && (
+              <div className="text-xs text-blue-800">
+                Wrapped edge types: static {simulationResult.wrappedEdgesByType.static} · demurraged {simulationResult.wrappedEdgesByType.demurraged}
+              </div>
+            )}
+            <div>Sub-calls: {simulationResult.calls} (unwrap: {simulationResult.unwrapCalls}, re-wrap: {simulationResult.wrapCalls})</div>
+            {simulationResult.unwrapByType && (
+              <div className="text-xs text-blue-800">
+                Unwrap targets: static {simulationResult.unwrapByType.static} · demurraged {simulationResult.unwrapByType.demurraged}
+              </div>
+            )}
+            <div className="text-xs text-blue-700">Order: self-approval → unwrap(s) → operateFlowMatrix → re-wrap(s)</div>
+
+            {simulationResult.diagnostics?.staticWrappers?.length > 0 && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Static wrappers</div>
+                <div className="mt-1 overflow-auto rounded border border-blue-200 bg-white/80">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-blue-100/70 text-blue-900">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Wrapper</th>
+                        <th className="px-2 py-1 text-right">Path demurraged</th>
+                        <th className="px-2 py-1 text-right">Unwrapped static</th>
+                        <th className="px-2 py-1 text-right">Unwrapped demurraged</th>
+                        <th className="px-2 py-1 text-right">Spent demurraged</th>
+                        <th className="px-2 py-1 text-right">Re-wrap demurraged</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simulationResult.diagnostics.staticWrappers.map((row) => (
+                        <tr key={row.wrapper} className="border-t border-blue-100">
+                          <td className="px-2 py-1 font-mono text-[11px]">{row.wrapper}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.pathDemurraged)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.staticBalanceUnwrapped)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedBalanceUnwrapped)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedSpent)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedRemainingToWrap)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {simulationResult.diagnostics?.demurragedWrappers?.length > 0 && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Demurraged wrappers</div>
+                <div className="mt-1 overflow-auto rounded border border-blue-200 bg-white/80">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-blue-100/70 text-blue-900">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Wrapper</th>
+                        <th className="px-2 py-1 text-right">Path demurraged</th>
+                        <th className="px-2 py-1 text-right">Unwrap demurraged</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simulationResult.diagnostics.demurragedWrappers.map((row) => (
+                        <tr key={row.wrapper} className="border-t border-blue-100">
+                          <td className="px-2 py-1 font-mono text-[11px]">{row.wrapper}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.pathDemurraged)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{toDisplayValue(row.demurragedUnwrapAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {simulationResult.diagnostics?.callTimeline?.length > 0 && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Sub-call timeline</div>
+                <div className="mt-1 overflow-auto rounded border border-blue-200 bg-white/80">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-blue-100/70 text-blue-900">
+                      <tr>
+                        <th className="px-2 py-1 text-right">#</th>
+                        <th className="px-2 py-1 text-left">Action</th>
+                        <th className="px-2 py-1 text-left">To</th>
+                        <th className="px-2 py-1 text-left">Selector</th>
+                        <th className="px-2 py-1 text-right">Bytes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simulationResult.diagnostics.callTimeline.map((row) => (
+                        <tr key={`${row.index}-${row.selector}`} className="border-t border-blue-100">
+                          <td className="px-2 py-1 text-right font-mono">{row.index}</td>
+                          <td className="px-2 py-1">{row.label}</td>
+                          <td className="px-2 py-1 font-mono text-[11px]">{row.to}</td>
+                          <td className="px-2 py-1 font-mono">{row.selector}</td>
+                          <td className="px-2 py-1 text-right font-mono">{row.dataLengthBytes}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {simulationResult.simulationLog && (
+              <div className="mt-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Simulation log</div>
+                <pre className="mt-1 max-h-64 overflow-auto rounded border border-blue-200 bg-white/70 p-2 font-mono text-xs text-blue-900 whitespace-pre-wrap text-left">
+                  {simulationResult.simulationLog}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
+        {showParamsSection && (
+          <div className="relative">
+            <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-96 font-mono text-sm">
+              <pre className="whitespace-pre-wrap text-left">{formattedJson}</pre>
+            </div>
+          </div>
+        )}
+        {showParamsSection && calldata && (
           <div className="mt-3">
             <p className="text-xs text-gray-500 mb-1">Encoded calldata ({calldata.length} chars)</p>
             <div className="bg-gray-50 p-2 rounded-md overflow-auto max-h-24 font-mono text-xs text-gray-600 break-all">
@@ -449,7 +754,12 @@ const FlowMatrixParams = ({ pathData, sender, receiver, showProcessed, isFiltere
 
 FlowMatrixParams.propTypes = {
   pathData: PropTypes.object,
+  rawPathData: PropTypes.object,
   sender: PropTypes.string,
+  receiver: PropTypes.string,
+  showProcessed: PropTypes.bool,
+  isFiltered: PropTypes.bool,
+  view: PropTypes.oneOf(['all', 'params', 'simulation']),
 };
 
 export default FlowMatrixParams;
