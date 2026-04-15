@@ -6,6 +6,7 @@ import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { decomposeFlow, transfersFromRoutes } from '@/utils/flowDecomposition';
 import { parseAddressList } from '@/services/circlesApi';
+import { getOrCreateSession } from '@/services/testEnvService';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
@@ -49,6 +50,9 @@ const FlowVisualization = () => {
     handleTokensChange, 
     handleWithWrapToggle,
     handleStagingToggle,
+    handleTestEnvToggle,
+    handleTestEnvUrlChange,
+    handleTestEnvBlockNumberChange,
     handleQuantizedModeToggle,
     handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,
@@ -58,6 +62,7 @@ const FlowVisualization = () => {
     validateFormData,
   } = useFormData();
   const [formWarnings, setFormWarnings] = useState([]);
+  const [testEnvSession, setTestEnvSession] = useState(null);
   
   const {
     pathData,
@@ -416,6 +421,28 @@ const FlowVisualization = () => {
     if (!validation.isValid) {
       return;
     }
+
+    // If test-env mode, create/reuse session and attach to formData
+    if (baseData.UseTestEnv) {
+      if (!baseData.TestEnvBlockNumber) {
+        setFormWarnings(['Enter a block number for test environment mode']);
+        return;
+      }
+      try {
+        const session = await getOrCreateSession(
+          baseData.TestEnvUrl,
+          Number(baseData.TestEnvBlockNumber)
+        );
+        setTestEnvSession(session);
+        await executeFindPath({ ...baseData, testEnvSession: session });
+      } catch (err) {
+        setFormWarnings([`Test-env session error: ${err.message}`]);
+        setTestEnvSession(null);
+      }
+      return;
+    }
+
+    setTestEnvSession(null);
     await executeFindPath(baseData);
   }, [formData, executeFindPath, validateFormData]);
 
@@ -836,6 +863,10 @@ const FlowVisualization = () => {
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
             handleStagingToggle={handleStagingToggle}
+            handleTestEnvToggle={handleTestEnvToggle}
+            handleTestEnvUrlChange={handleTestEnvUrlChange}
+            handleTestEnvBlockNumberChange={handleTestEnvBlockNumberChange}
+            testEnvSession={testEnvSession}
             handleQuantizedModeToggle={handleQuantizedModeToggle}
             handleDebugIntermediateToggle={handleDebugIntermediateToggle}
             handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}

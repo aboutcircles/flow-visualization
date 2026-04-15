@@ -34,6 +34,9 @@ const DEFAULTS = {
   Amount: '1000000000000000000000',
   WithWrap: true,
   UseStaging: false,
+  UseTestEnv: false,
+  TestEnvUrl: 'https://staging.circlesubi.network/test-env',
+  TestEnvBlockNumber: '',
   MaxTransfers: '10',
   IsFromTokensExcluded: false,
   IsToTokensExcluded: false,
@@ -202,8 +205,25 @@ export const useFormData = () => {
   const handleStagingToggle = () => {
     setFormData(prev => ({
       ...prev,
-      UseStaging: !prev.UseStaging
+      UseStaging: !prev.UseStaging,
+      UseTestEnv: false // mutually exclusive
     }));
+  };
+
+  const handleTestEnvToggle = () => {
+    setFormData(prev => ({
+      ...prev,
+      UseTestEnv: !prev.UseTestEnv,
+      UseStaging: false // mutually exclusive
+    }));
+  };
+
+  const handleTestEnvUrlChange = (e) => {
+    setFormData(prev => ({ ...prev, TestEnvUrl: e.target.value }));
+  };
+
+  const handleTestEnvBlockNumberChange = (e) => {
+    setFormData(prev => ({ ...prev, TestEnvBlockNumber: e.target.value }));
   };
 
   const handleQuantizedModeToggle = () => {
@@ -365,6 +385,9 @@ export const useFormData = () => {
     handleTokensChange,
     handleWithWrapToggle,
     handleStagingToggle,
+    handleTestEnvToggle,
+    handleTestEnvUrlChange,
+    handleTestEnvBlockNumberChange,
     handleQuantizedModeToggle,
     handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,

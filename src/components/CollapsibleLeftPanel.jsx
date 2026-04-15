@@ -16,8 +16,12 @@ const CollapsibleLeftPanel = ({
   handleTokensChange,
   handleWithWrapToggle,
   handleStagingToggle,
+  handleTestEnvToggle,
+  handleTestEnvUrlChange,
+  handleTestEnvBlockNumberChange,
   handleQuantizedModeToggle,
   handleDebugIntermediateToggle,
+  testEnvSession,
   handleFromTokensExclusionToggle,
   handleToTokensExclusionToggle,
   onFindPath,
@@ -96,8 +100,12 @@ const CollapsibleLeftPanel = ({
                 handleTokensChange={handleTokensChange}
                 handleWithWrapToggle={handleWithWrapToggle}
                 handleStagingToggle={handleStagingToggle}
+                handleTestEnvToggle={handleTestEnvToggle}
+                handleTestEnvUrlChange={handleTestEnvUrlChange}
+                handleTestEnvBlockNumberChange={handleTestEnvBlockNumberChange}
                 handleQuantizedModeToggle={handleQuantizedModeToggle}
                 handleDebugIntermediateToggle={handleDebugIntermediateToggle}
+                testEnvSession={testEnvSession}
                 handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
                 handleToTokensExclusionToggle={handleToTokensExclusionToggle}
                 onFindPath={onFindPath}

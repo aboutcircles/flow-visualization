@@ -12,6 +12,7 @@ import cacheService from './cacheService';
 
 export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
 export const STAGING_ENDPOINT = 'https://staging.circlesubi.network/';
+export const DEFAULT_TEST_ENV_URL = 'https://staging.circlesubi.network/test-env';
 
 const fetchTokenBalancesForAddress = async (address) => {
   const res = await fetch(API_ENDPOINT, {
@@ -110,8 +111,12 @@ export const ethToWei = (crcAmount) => {
 };
 
 export const findPath = async (formData, sdkRpc) => {
+  // Test environment mode: route through test-env RPC proxy
+  if (formData.UseTestEnv && formData.testEnvSession) {
+    return findPathViaTestEnv(formData);
+  }
+
   // If staging endpoint requested, create a temporary SDK client for it
-  const endpoint = formData.UseStaging ? STAGING_ENDPOINT : API_ENDPOINT;
   const rpc = formData.UseStaging ? new CirclesRpc(STAGING_ENDPOINT) : sdkRpc;
   try {
     // Include and exclude can coexist when quick-filter sends both
@@ -187,6 +192,84 @@ export const findPath = async (formData, sdkRpc) => {
     console.error('SDK findPath error:', err);
     throw err;
   }
+};
+
+/**
+ * Sends a circlesV2_findPath JSON-RPC call through the test-env RPC proxy.
+ * The proxy adds X-Max-Block-Number header, so the pathfinder uses a block-filtered graph.
+ */
+const findPathViaTestEnv = async (formData) => {
+  const { testEnvSession } = formData;
+  if (!testEnvSession?.rpcProxyUrl) {
+    throw new Error('No active test-env session');
+  }
+
+  const fromTokensArray = formData.IsFromTokensExcluded
+    ? [] : parseAddressList(formData.FromTokens);
+  const excludedFromTokensArray = parseAddressList(formData.ExcludedFromTokens);
+  const toTokensArray = formData.IsToTokensExcluded
+    ? [] : parseAddressList(formData.ToTokens);
+  const excludedToTokensArray = parseAddressList(formData.ExcludedToTokens);
+
+  const flowRequest = {
+    source: normalizeAddress(formData.From),
+    sink: normalizeAddress(formData.To),
+    targetFlow: formData.Amount,
+    withWrap: formData.WithWrap || false,
+    quantizedMode: formData.QuantizedMode || false,
+    debugShowIntermediateSteps: formData.DebugShowIntermediateSteps || false,
+  };
+
+  if (fromTokensArray.length > 0) flowRequest.fromTokens = fromTokensArray;
+  if (toTokensArray.length > 0) flowRequest.toTokens = toTokensArray;
+  if (excludedFromTokensArray.length > 0) flowRequest.excludedFromTokens = excludedFromTokensArray;
+  if (excludedToTokensArray.length > 0) flowRequest.excludedToTokens = excludedToTokensArray;
+  if (formData.MaxTransfers) flowRequest.maxTransfers = Number(formData.MaxTransfers);
+
+  const simulatedBalances = parseJsonArray(formData.SimulatedBalances)
+    .map(e => {
+      const holder = normalizeAddress(e?.holder);
+      const token = normalizeAddress(e?.token);
+      const amount = toValidUint(e?.amount);
+      if (!holder || !token || amount === null) return null;
+      return { holder, token, amount: amount.toString(), isWrapped: e?.isWrapped === true, isStatic: e?.isStatic === true };
+    }).filter(Boolean);
+
+  const simulatedTrusts = parseJsonArray(formData.SimulatedTrusts)
+    .map(e => {
+      const truster = normalizeAddress(e?.truster);
+      const trustee = normalizeAddress(e?.trustee);
+      if (!truster || !trustee) return null;
+      return { truster, trustee };
+    }).filter(Boolean);
+
+  if (simulatedBalances.length > 0) flowRequest.simulatedBalances = simulatedBalances;
+  if (simulatedTrusts.length > 0) flowRequest.simulatedTrusts = simulatedTrusts;
+
+  console.log('Test-env findPath via RPC proxy:', testEnvSession.rpcProxyUrl, flowRequest);
+
+  const response = await fetch(testEnvSession.rpcProxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'circlesV2_findPath',
+      params: [flowRequest]
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Test-env RPC error: ${response.status} — ${error}`);
+  }
+
+  const rpcResponse = await response.json();
+  if (rpcResponse?.error) {
+    throw new Error(rpcResponse.error.message || 'RPC error from test-env');
+  }
+
+  return rpcResponse.result;
 };
 
 export const processPath = async (rawPath, sourceAddress) => {
