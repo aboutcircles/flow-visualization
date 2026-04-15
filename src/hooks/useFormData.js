@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ethToWei } from '../services/circlesApi';
+import { ethToWei, DEFAULT_TEST_ENV_URL } from '../services/circlesApi';
 
 const STORAGE_KEY = 'flow-viz-form';
 
@@ -35,7 +35,7 @@ const DEFAULTS = {
   WithWrap: true,
   UseStaging: false,
   UseTestEnv: false,
-  TestEnvUrl: 'https://staging.circlesubi.network/test-env',
+  TestEnvUrl: DEFAULT_TEST_ENV_URL,
   TestEnvBlockNumber: '',
   MaxTransfers: '10',
   IsFromTokensExcluded: false,

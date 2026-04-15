@@ -214,7 +214,7 @@ const findPathViaTestEnv = async (formData) => {
   const flowRequest = {
     source: normalizeAddress(formData.From),
     sink: normalizeAddress(formData.To),
-    targetFlow: formData.Amount,
+    targetFlow: String(BigInt(formData.Amount)),
     withWrap: formData.WithWrap || false,
     quantizedMode: formData.QuantizedMode || false,
     debugShowIntermediateSteps: formData.DebugShowIntermediateSteps || false,
@@ -243,33 +243,45 @@ const findPathViaTestEnv = async (formData) => {
       return { truster, trustee };
     }).filter(Boolean);
 
+  const simulatedConsentedAvatars = dedupeAddresses(
+    parseAddressList(formData.SimulatedConsentedAvatars)
+  );
+
   if (simulatedBalances.length > 0) flowRequest.simulatedBalances = simulatedBalances;
   if (simulatedTrusts.length > 0) flowRequest.simulatedTrusts = simulatedTrusts;
+  if (simulatedConsentedAvatars.length > 0) flowRequest.simulatedConsentedAvatars = simulatedConsentedAvatars;
 
   console.log('Test-env findPath via RPC proxy:', testEnvSession.rpcProxyUrl, flowRequest);
 
-  const response = await fetch(testEnvSession.rpcProxyUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'circlesV2_findPath',
-      params: [flowRequest]
-    })
-  });
+  try {
+    const response = await fetch(testEnvSession.rpcProxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'circlesV2_findPath',
+        params: [flowRequest]
+      })
+    });
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Test-env RPC error: ${response.status} — ${error}`);
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Test-env RPC error: ${response.status} — ${error}`);
+    }
+
+    const rpcResponse = await response.json();
+    if (rpcResponse?.error) {
+      throw new Error(rpcResponse.error.message || 'RPC error from test-env');
+    }
+
+    // Note: token metadata and profile enrichment still uses production endpoints.
+    // Historical path data is correct, but displayed metadata reflects current state.
+    return stringifyBigInts(rpcResponse.result);
+  } catch (err) {
+    console.error('Test-env findPath error:', err);
+    throw err;
   }
-
-  const rpcResponse = await response.json();
-  if (rpcResponse?.error) {
-    throw new Error(rpcResponse.error.message || 'RPC error from test-env');
-  }
-
-  return rpcResponse.result;
 };
 
 export const processPath = async (rawPath, sourceAddress) => {

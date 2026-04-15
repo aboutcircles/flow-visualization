@@ -3,24 +3,28 @@
  *
  * Creates and manages sessions against the Circles test environment,
  * which proxies RPC calls with X-Max-Block-Number for block-filtered queries.
+ *
+ * Note: Post-pathfinding enrichment (token info, profiles, balances) still
+ * uses production endpoints — historical path data is correct, but displayed
+ * metadata reflects current state. This is a known v1 limitation.
  */
 
-const DEFAULT_TEST_ENV_URL = 'https://staging.circlesubi.network/test-env';
+import { DEFAULT_TEST_ENV_URL } from './circlesApi';
 
 let activeSession = null;
-let sessionTimer = null;
 
 /**
  * Creates a test-env session at the given block number.
  * Reuses existing session if same block and not expired.
  */
 export async function getOrCreateSession(testEnvUrl, blockNumber) {
-  const baseUrl = (testEnvUrl || DEFAULT_TEST_ENV_URL).replace(/\/$/, '');
+  const baseUrl = resolveBaseUrl(testEnvUrl);
+  const numBlock = Number(blockNumber);
 
   // Reuse if same block and not expired
   if (activeSession
     && activeSession.baseUrl === baseUrl
-    && activeSession.blockNumber === blockNumber
+    && activeSession.blockNumber === numBlock
     && activeSession.expiresAt > new Date()) {
     return activeSession;
   }
@@ -34,7 +38,7 @@ export async function getOrCreateSession(testEnvUrl, blockNumber) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      blockNumber: Number(blockNumber),
+      blockNumber: numBlock,
       features: ['db', 'rpc'],
       ttl: '30m'
     })
@@ -47,43 +51,21 @@ export async function getOrCreateSession(testEnvUrl, blockNumber) {
 
   const session = await response.json();
 
+  if (!session.sessionId) {
+    throw new Error('Server returned session without sessionId');
+  }
+
+  // Explicitly construct — don't spread unknown server fields
   activeSession = {
-    ...session,
+    sessionId: session.sessionId,
     baseUrl,
-    blockNumber: Number(blockNumber),
+    blockNumber: numBlock,
     expiresAt: new Date(session.expiresAt),
-    rpcProxyUrl: `${baseUrl}/api/v1/session/${session.sessionId}/rpc`
+    rpcProxyUrl: `${baseUrl}/api/v1/session/${session.sessionId}/rpc`,
+    status: session.status,
   };
 
   return activeSession;
-}
-
-/**
- * Sends a JSON-RPC request through the test-env RPC proxy.
- * The proxy adds X-Max-Block-Number header automatically.
- */
-export async function sendRpcRequest(method, params) {
-  if (!activeSession) {
-    throw new Error('No active test-env session');
-  }
-
-  const response = await fetch(activeSession.rpcProxyUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method,
-      params
-    })
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Test-env RPC error: ${response.status} — ${error}`);
-  }
-
-  return response.json();
 }
 
 /**
@@ -95,20 +77,15 @@ export async function destroySession() {
   const { baseUrl, sessionId } = activeSession;
   activeSession = null;
 
-  if (sessionTimer) {
-    clearInterval(sessionTimer);
-    sessionTimer = null;
-  }
-
   try {
     await fetch(`${baseUrl}/api/v1/session/${sessionId}`, { method: 'DELETE' });
   } catch {
-    // Ignore cleanup errors
+    // Ignore cleanup errors — session will expire via TTL
   }
 }
 
 /**
- * Gets the active session info (or null).
+ * Gets the active session info (or null if expired/missing).
  */
 export function getActiveSession() {
   if (activeSession && activeSession.expiresAt <= new Date()) {
@@ -121,7 +98,7 @@ export function getActiveSession() {
  * Checks if a block number exists in the test-env database.
  */
 export async function checkBlockExists(testEnvUrl, blockNumber) {
-  const baseUrl = (testEnvUrl || DEFAULT_TEST_ENV_URL).replace(/\/$/, '');
+  const baseUrl = resolveBaseUrl(testEnvUrl);
   try {
     const response = await fetch(`${baseUrl}/api/v1/blocks/${blockNumber}/exists`);
     if (!response.ok) return false;
@@ -136,7 +113,7 @@ export async function checkBlockExists(testEnvUrl, blockNumber) {
  * Gets the latest indexed block from the test-env.
  */
 export async function getLatestBlock(testEnvUrl) {
-  const baseUrl = (testEnvUrl || DEFAULT_TEST_ENV_URL).replace(/\/$/, '');
+  const baseUrl = resolveBaseUrl(testEnvUrl);
   const response = await fetch(`${baseUrl}/api/v1/blocks/current`);
   if (!response.ok) throw new Error('Failed to get latest block');
   const data = await response.json();
@@ -147,7 +124,7 @@ export async function getLatestBlock(testEnvUrl) {
  * Gets the health status of the test-env.
  */
 export async function getTestEnvHealth(testEnvUrl) {
-  const baseUrl = (testEnvUrl || DEFAULT_TEST_ENV_URL).replace(/\/$/, '');
+  const baseUrl = resolveBaseUrl(testEnvUrl);
   try {
     const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(5000) });
     if (!response.ok) return null;
@@ -155,4 +132,8 @@ export async function getTestEnvHealth(testEnvUrl) {
   } catch {
     return null;
   }
+}
+
+function resolveBaseUrl(testEnvUrl) {
+  return (testEnvUrl || DEFAULT_TEST_ENV_URL).replace(/\/$/, '');
 }
