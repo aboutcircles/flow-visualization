@@ -79,8 +79,9 @@ export async function destroySession() {
 
   try {
     await fetch(`${baseUrl}/api/v1/session/${sessionId}`, { method: 'DELETE' });
-  } catch {
-    // Ignore cleanup errors — session will expire via TTL
+  } catch (err) {
+    // Non-fatal — session will expire via TTL, but log for debugging
+    console.warn(`Failed to destroy test-env session ${sessionId}:`, err.message);
   }
 }
 

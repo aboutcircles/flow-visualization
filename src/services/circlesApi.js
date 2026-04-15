@@ -275,6 +275,10 @@ const findPathViaTestEnv = async (formData) => {
       throw new Error(rpcResponse.error.message || 'RPC error from test-env');
     }
 
+    if (!rpcResponse.result) {
+      throw new Error('Test-env RPC returned no result — no path found or block has no Circles activity');
+    }
+
     // Note: token metadata and profile enrichment still uses production endpoints.
     // Historical path data is correct, but displayed metadata reflects current state.
     return stringifyBigInts(rpcResponse.result);
