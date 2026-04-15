@@ -112,7 +112,10 @@ export const ethToWei = (crcAmount) => {
 
 export const findPath = async (formData, sdkRpc) => {
   // Test environment mode: route through test-env RPC proxy
-  if (formData.UseTestEnv && formData.testEnvSession) {
+  if (formData.UseTestEnv) {
+    if (!formData.testEnvSession) {
+      throw new Error('Test environment is enabled but no active session is attached');
+    }
     return findPathViaTestEnv(formData);
   }
 

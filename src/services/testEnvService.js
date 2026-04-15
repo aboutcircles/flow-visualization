@@ -20,6 +20,9 @@ let activeSession = null;
 export async function getOrCreateSession(testEnvUrl, blockNumber) {
   const baseUrl = resolveBaseUrl(testEnvUrl);
   const numBlock = Number(blockNumber);
+  if (!Number.isInteger(numBlock) || numBlock < 0) {
+    throw new Error('Block number must be a non-negative integer');
+  }
 
   // Reuse if same block and not expired
   if (activeSession
@@ -78,7 +81,11 @@ export async function destroySession() {
   activeSession = null;
 
   try {
-    await fetch(`${baseUrl}/api/v1/session/${sessionId}`, { method: 'DELETE' });
+    const response = await fetch(`${baseUrl}/api/v1/session/${sessionId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      console.warn(`Failed to destroy test-env session ${sessionId}: HTTP ${response.status}${detail ? ` — ${detail}` : ''}`);
+    }
   } catch (err) {
     // Non-fatal — session will expire via TTL, but log for debugging
     console.warn(`Failed to destroy test-env session ${sessionId}:`, err.message);

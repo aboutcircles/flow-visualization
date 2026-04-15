@@ -342,8 +342,31 @@ const FlowVisualization = () => {
     setSelectedTransactionId(null);
     clearHighlights();
 
+    // If test-env mode, ensure we have a valid session attached
+    if (requestData.UseTestEnv) {
+      if (!requestData.TestEnvBlockNumber) {
+        setFormWarnings(['Enter a block number for test environment mode']);
+        return;
+      }
+      const parsedBlock = Number(requestData.TestEnvBlockNumber);
+      if (!Number.isInteger(parsedBlock) || parsedBlock < 0) {
+        setFormWarnings(['Block number must be a non-negative integer']);
+        return;
+      }
+      try {
+        const session = await getOrCreateSession(requestData.TestEnvUrl, parsedBlock);
+        setTestEnvSession(session);
+        await loadPathData({ ...requestData, testEnvSession: session });
+      } catch (err) {
+        setFormWarnings([`Test-env session error: ${err.message}`]);
+        setTestEnvSession(null);
+      }
+      return;
+    }
+
+    setTestEnvSession(null);
     await loadPathData(requestData);
-  }, [loadPathData, clearHighlights]);
+  }, [loadPathData, clearHighlights, setFormWarnings, setTestEnvSession]);
 
   const selectQuickTokensByPredicate = useCallback(async (predicate) => {
     const allTokens = Array.from(new Set(
@@ -422,27 +445,6 @@ const FlowVisualization = () => {
       return;
     }
 
-    // If test-env mode, create/reuse session and attach to formData
-    if (baseData.UseTestEnv) {
-      if (!baseData.TestEnvBlockNumber) {
-        setFormWarnings(['Enter a block number for test environment mode']);
-        return;
-      }
-      try {
-        const session = await getOrCreateSession(
-          baseData.TestEnvUrl,
-          Number(baseData.TestEnvBlockNumber)
-        );
-        setTestEnvSession(session);
-        await executeFindPath({ ...baseData, testEnvSession: session });
-      } catch (err) {
-        setFormWarnings([`Test-env session error: ${err.message}`]);
-        setTestEnvSession(null);
-      }
-      return;
-    }
-
-    setTestEnvSession(null);
     await executeFindPath(baseData);
   }, [formData, executeFindPath, validateFormData]);
 
