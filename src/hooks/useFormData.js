@@ -9,6 +9,10 @@ function loadSavedForm() {
     if (saved) {
       const parsed = JSON.parse(saved);
       const merged = { ...DEFAULTS, ...parsed };
+      // Test-env requires staging — normalize on load
+      if (merged.UseTestEnv && !merged.UseStaging) {
+        merged.UseStaging = true;
+      }
       console.log('[form-persist] loaded:', {
         FromTokens: merged.FromTokens,
         ToTokens: merged.ToTokens,
@@ -206,7 +210,8 @@ export const useFormData = () => {
     setFormData(prev => ({
       ...prev,
       UseStaging: !prev.UseStaging,
-      UseTestEnv: false // mutually exclusive
+      // Turning off staging also turns off test-env (test-env requires staging)
+      UseTestEnv: !prev.UseStaging ? prev.UseTestEnv : false,
     }));
   };
 
@@ -214,7 +219,8 @@ export const useFormData = () => {
     setFormData(prev => ({
       ...prev,
       UseTestEnv: !prev.UseTestEnv,
-      UseStaging: false // mutually exclusive
+      // Test-env requires staging — auto-enable it
+      UseStaging: !prev.UseTestEnv ? true : prev.UseStaging,
     }));
   };
 

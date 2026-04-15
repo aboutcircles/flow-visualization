@@ -22,6 +22,7 @@ const CollapsibleLeftPanel = ({
   handleQuantizedModeToggle,
   handleDebugIntermediateToggle,
   testEnvSession,
+  onDestroySession,
   handleFromTokensExclusionToggle,
   handleToTokensExclusionToggle,
   onFindPath,
@@ -106,6 +107,7 @@ const CollapsibleLeftPanel = ({
                 handleQuantizedModeToggle={handleQuantizedModeToggle}
                 handleDebugIntermediateToggle={handleDebugIntermediateToggle}
                 testEnvSession={testEnvSession}
+                onDestroySession={onDestroySession}
                 handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
                 handleToTokensExclusionToggle={handleToTokensExclusionToggle}
                 onFindPath={onFindPath}

@@ -6,7 +6,7 @@ import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { decomposeFlow, transfersFromRoutes } from '@/utils/flowDecomposition';
 import { parseAddressList } from '@/services/circlesApi';
-import { getOrCreateSession } from '@/services/testEnvService';
+import { getOrCreateSession, destroySession } from '@/services/testEnvService';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
@@ -63,7 +63,12 @@ const FlowVisualization = () => {
   } = useFormData();
   const [formWarnings, setFormWarnings] = useState([]);
   const [testEnvSession, setTestEnvSession] = useState(null);
-  
+
+  const handleDestroySession = useCallback(async () => {
+    await destroySession();
+    setTestEnvSession(null);
+  }, []);
+
   const {
     pathData,
     rawPathData,
@@ -358,7 +363,11 @@ const FlowVisualization = () => {
         setTestEnvSession(session);
         await loadPathData({ ...requestData, testEnvSession: session });
       } catch (err) {
-        setFormWarnings([`Test-env session error: ${err.message}`]);
+        const isMaxSessions = err.message.includes('Maximum concurrent sessions');
+        const hint = isMaxSessions
+          ? ' — close unused sessions or wait for them to expire (30 min TTL).'
+          : '';
+        setFormWarnings([`Test-env session error: ${err.message}${hint}`]);
         setTestEnvSession(null);
       }
       return;
@@ -869,6 +878,7 @@ const FlowVisualization = () => {
             handleTestEnvUrlChange={handleTestEnvUrlChange}
             handleTestEnvBlockNumberChange={handleTestEnvBlockNumberChange}
             testEnvSession={testEnvSession}
+            onDestroySession={handleDestroySession}
             handleQuantizedModeToggle={handleQuantizedModeToggle}
             handleDebugIntermediateToggle={handleDebugIntermediateToggle}
             handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}
