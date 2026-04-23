@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useFormData, isAddress } from '@/hooks/useFormData';
+import { useFormData } from '@/hooks/useFormData';
 import { usePathData } from '@/hooks/usePathData';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePerformance } from '@/contexts/PerformanceContext';
@@ -423,13 +423,8 @@ const FlowVisualization = () => {
   const hasAutoRun = useRef(false);
   useEffect(() => {
     if (hasAutoRun.current) return;
-    if (
-      isAddress(formData.From) &&
-      isAddress(formData.To) &&
-      formData.From.toLowerCase() !== formData.To.toLowerCase() &&
-      formData.Amount &&
-      formData.Amount !== '0'
-    ) {
+    const isAddress = (v) => typeof v === 'string' && /^0x[a-fA-F0-9]{40}$/.test(v.trim());
+    if (isAddress(formData.From) && isAddress(formData.To) && formData.Amount && formData.Amount !== '0') {
       hasAutoRun.current = true;
       handleFindPath();
     }
@@ -655,11 +650,6 @@ const FlowVisualization = () => {
     }
     const source = formData.From.toLowerCase();
     const sink = formData.To.toLowerCase();
-    if (source === sink) {
-      setRoutes([]);
-      setSelectedRouteIds(new Set());
-      return;
-    }
     const decomposed = decomposeFlow(pathData.transfers, source, sink);
     setRoutes(decomposed);
     setSelectedRouteIds(new Set(decomposed.map(r => r.id)));
