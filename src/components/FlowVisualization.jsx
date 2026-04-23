@@ -6,6 +6,7 @@ import { usePerformance } from '@/contexts/PerformanceContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { decomposeFlow, transfersFromRoutes } from '@/utils/flowDecomposition';
 import { parseAddressList } from '@/services/circlesApi';
+import { getOrCreateSession, destroySession } from '@/services/testEnvService';
 import Header from '@/components/ui/header';
 import CollapsibleLeftPanel from '@/components/CollapsibleLeftPanel';
 import CytoscapeVisualization from '@/components/CytoscapeVisualization';
@@ -49,6 +50,9 @@ const FlowVisualization = () => {
     handleTokensChange, 
     handleWithWrapToggle,
     handleStagingToggle,
+    handleTestEnvToggle,
+    handleTestEnvUrlChange,
+    handleTestEnvBlockNumberChange,
     handleQuantizedModeToggle,
     handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,
@@ -58,7 +62,13 @@ const FlowVisualization = () => {
     validateFormData,
   } = useFormData();
   const [formWarnings, setFormWarnings] = useState([]);
-  
+  const [testEnvSession, setTestEnvSession] = useState(null);
+
+  const handleDestroySession = useCallback(async () => {
+    await destroySession();
+    setTestEnvSession(null);
+  }, []);
+
   const {
     pathData,
     rawPathData,
@@ -337,8 +347,35 @@ const FlowVisualization = () => {
     setSelectedTransactionId(null);
     clearHighlights();
 
+    // If test-env mode, ensure we have a valid session attached
+    if (requestData.UseTestEnv) {
+      if (!requestData.TestEnvBlockNumber) {
+        setFormWarnings(['Enter a block number for test environment mode']);
+        return;
+      }
+      const parsedBlock = Number(requestData.TestEnvBlockNumber);
+      if (!Number.isInteger(parsedBlock) || parsedBlock < 0) {
+        setFormWarnings(['Block number must be a non-negative integer']);
+        return;
+      }
+      try {
+        const session = await getOrCreateSession(requestData.TestEnvUrl, parsedBlock);
+        setTestEnvSession(session);
+        await loadPathData({ ...requestData, testEnvSession: session });
+      } catch (err) {
+        const isMaxSessions = err.message.includes('Maximum concurrent sessions');
+        const hint = isMaxSessions
+          ? ' — close unused sessions or wait for them to expire (30 min TTL).'
+          : '';
+        setFormWarnings([`Test-env session error: ${err.message}${hint}`]);
+        setTestEnvSession(null);
+      }
+      return;
+    }
+
+    setTestEnvSession(null);
     await loadPathData(requestData);
-  }, [loadPathData, clearHighlights]);
+  }, [loadPathData, clearHighlights, setFormWarnings, setTestEnvSession]);
 
   const selectQuickTokensByPredicate = useCallback(async (predicate) => {
     const allTokens = Array.from(new Set(
@@ -416,6 +453,7 @@ const FlowVisualization = () => {
     if (!validation.isValid) {
       return;
     }
+
     await executeFindPath(baseData);
   }, [formData, executeFindPath, validateFormData]);
 
@@ -836,6 +874,11 @@ const FlowVisualization = () => {
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
             handleStagingToggle={handleStagingToggle}
+            handleTestEnvToggle={handleTestEnvToggle}
+            handleTestEnvUrlChange={handleTestEnvUrlChange}
+            handleTestEnvBlockNumberChange={handleTestEnvBlockNumberChange}
+            testEnvSession={testEnvSession}
+            onDestroySession={handleDestroySession}
             handleQuantizedModeToggle={handleQuantizedModeToggle}
             handleDebugIntermediateToggle={handleDebugIntermediateToggle}
             handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}

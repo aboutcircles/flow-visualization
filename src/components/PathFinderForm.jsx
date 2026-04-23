@@ -58,8 +58,13 @@ const PathFinderForm = ({
   handleTokensChange,
   handleWithWrapToggle,
   handleStagingToggle,
+  handleTestEnvToggle,
+  handleTestEnvUrlChange,
+  handleTestEnvBlockNumberChange,
   handleQuantizedModeToggle,
   handleDebugIntermediateToggle,
+  testEnvSession,
+  onDestroySession,
   handleFromTokensExclusionToggle,
   handleToTokensExclusionToggle,
   onFindPath,
@@ -358,6 +363,66 @@ const PathFinderForm = ({
           />
           <InfoTip text={`Prod: rpc.aboutcircles.com\nStaging: staging.circlesubi.network\n\nCurrently using: ${formData.UseStaging ? 'staging.circlesubi.network' : 'rpc.aboutcircles.com'}`} />
         </div>
+        {formData.UseStaging && (
+          <div className="flex items-center">
+            <ToggleSwitch
+              isEnabled={formData.UseTestEnv}
+              onToggle={handleTestEnvToggle}
+              label="Test Environment"
+            />
+            <InfoTip text="Run pathfinder against historical blockchain state at a specific block number. Creates a test-env session (30 min TTL, max 10 concurrent) that filters all data to that block." />
+          </div>
+        )}
+        {formData.UseTestEnv && (
+          <div className="ml-4 space-y-2 border-l-2 border-blue-500/30 pl-3">
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-400">Test-Env URL</label>
+              <Input
+                type="text"
+                value={formData.TestEnvUrl}
+                onChange={handleTestEnvUrlChange}
+                className="text-xs"
+                placeholder="https://staging.circlesubi.network/test-env"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-400">Block Number</label>
+              <Input
+                type="text"
+                value={formData.TestEnvBlockNumber}
+                onChange={handleTestEnvBlockNumberChange}
+                className="text-xs"
+                placeholder="e.g. 43193632"
+              />
+            </div>
+            {testEnvSession && (
+              <div className="text-xs text-gray-300 bg-gray-800/60 border border-gray-700 rounded p-2 flex items-center justify-between">
+                <span>
+                  <span className="text-blue-400">Block {testEnvSession.blockNumber}</span>
+                  {testEnvSession.expiresAt && (
+                    <span className="text-gray-500 ml-1">
+                      · expires {new Date(testEnvSession.expiresAt).toLocaleTimeString()}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={onDestroySession}
+                  className="ml-2 text-gray-400 hover:text-gray-200 text-xs underline"
+                  title="Close session early to free up a slot"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+            {!testEnvSession && (
+              <div className="text-xs text-gray-500">Sessions last 30 minutes. Max 10 concurrent sessions on the server.</div>
+            )}
+            {formData.UseTestEnv && !formData.TestEnvBlockNumber && (
+              <div className="text-xs text-yellow-400">Enter a block number to query historical state</div>
+            )}
+          </div>
+        )}
         <div className="flex items-center opacity-40 pointer-events-none" title="Not yet supported by SDK">
           <ToggleSwitch
             isEnabled={formData.QuantizedMode}
@@ -630,7 +695,12 @@ PathFinderForm.propTypes = {
   handleTokensChange: PropTypes.func.isRequired,
   handleWithWrapToggle: PropTypes.func.isRequired,
   handleStagingToggle: PropTypes.func.isRequired,
+  handleTestEnvToggle: PropTypes.func.isRequired,
+  handleTestEnvUrlChange: PropTypes.func.isRequired,
+  handleTestEnvBlockNumberChange: PropTypes.func.isRequired,
   handleQuantizedModeToggle: PropTypes.func.isRequired,
+  testEnvSession: PropTypes.object,
+  onDestroySession: PropTypes.func.isRequired,
   handleDebugIntermediateToggle: PropTypes.func.isRequired,
   handleFromTokensExclusionToggle: PropTypes.func.isRequired,
   handleToTokensExclusionToggle: PropTypes.func.isRequired,

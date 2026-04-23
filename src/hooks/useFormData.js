@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ethToWei } from '../services/circlesApi';
+import { ethToWei, DEFAULT_TEST_ENV_URL } from '../services/circlesApi';
 
 const STORAGE_KEY = 'flow-viz-form';
 
@@ -9,6 +9,10 @@ function loadSavedForm() {
     if (saved) {
       const parsed = JSON.parse(saved);
       const merged = { ...DEFAULTS, ...parsed };
+      // Test-env requires staging — normalize on load
+      if (merged.UseTestEnv && !merged.UseStaging) {
+        merged.UseStaging = true;
+      }
       console.log('[form-persist] loaded:', {
         FromTokens: merged.FromTokens,
         ToTokens: merged.ToTokens,
@@ -34,6 +38,9 @@ const DEFAULTS = {
   Amount: '1000000000000000000000',
   WithWrap: true,
   UseStaging: false,
+  UseTestEnv: false,
+  TestEnvUrl: DEFAULT_TEST_ENV_URL,
+  TestEnvBlockNumber: '',
   MaxTransfers: '10',
   IsFromTokensExcluded: false,
   IsToTokensExcluded: false,
@@ -202,8 +209,27 @@ export const useFormData = () => {
   const handleStagingToggle = () => {
     setFormData(prev => ({
       ...prev,
-      UseStaging: !prev.UseStaging
+      UseStaging: !prev.UseStaging,
+      // Turning off staging also turns off test-env (test-env requires staging)
+      UseTestEnv: !prev.UseStaging ? prev.UseTestEnv : false,
     }));
+  };
+
+  const handleTestEnvToggle = () => {
+    setFormData(prev => ({
+      ...prev,
+      UseTestEnv: !prev.UseTestEnv,
+      // Test-env requires staging — auto-enable it
+      UseStaging: !prev.UseTestEnv ? true : prev.UseStaging,
+    }));
+  };
+
+  const handleTestEnvUrlChange = (e) => {
+    setFormData(prev => ({ ...prev, TestEnvUrl: e.target.value }));
+  };
+
+  const handleTestEnvBlockNumberChange = (e) => {
+    setFormData(prev => ({ ...prev, TestEnvBlockNumber: e.target.value }));
   };
 
   const handleQuantizedModeToggle = () => {
@@ -365,6 +391,9 @@ export const useFormData = () => {
     handleTokensChange,
     handleWithWrapToggle,
     handleStagingToggle,
+    handleTestEnvToggle,
+    handleTestEnvUrlChange,
+    handleTestEnvBlockNumberChange,
     handleQuantizedModeToggle,
     handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,
