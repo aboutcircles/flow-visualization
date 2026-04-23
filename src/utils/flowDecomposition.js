@@ -34,7 +34,7 @@ export function decomposeFlow(transfers, source, sink) {
 
     // DFS to find a path from source to sink
     const path = dfsPath(adj, source, sink);
-    if (!path) break;
+    if (!path || path.length === 0) break;
 
     // Flow = min capacity along the path
     const flow = path.reduce(
@@ -70,6 +70,8 @@ export function decomposeFlow(transfers, source, sink) {
 }
 
 function dfsPath(adj, source, sink) {
+  if (source === sink) return null;
+
   const visited = new Set();
   const path = [];
 
