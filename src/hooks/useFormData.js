@@ -9,6 +9,11 @@ function loadSavedForm() {
     if (saved) {
       const parsed = JSON.parse(saved);
       const merged = { ...DEFAULTS, ...parsed };
+      // Sanitize: reset To if it equals From to avoid crash loop
+      if (merged.From?.toLowerCase?.() === merged.To?.toLowerCase?.()) {
+        merged.To = DEFAULTS.To;
+        console.warn('[form-persist] sanitized: reset To to default because From === To');
+      }
       console.log('[form-persist] loaded:', {
         FromTokens: merged.FromTokens,
         ToTokens: merged.ToTokens,
@@ -44,7 +49,7 @@ const DEFAULTS = {
   SimulatedConsentedAvatars: '',
 };
 
-const isAddress = (value) => typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value.trim());
+export const isAddress = (value) => typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value.trim());
 
 const parseTokenSet = (value) => new Set(
   (value || '')
@@ -224,8 +229,13 @@ export const useFormData = () => {
     const nextErrors = {};
     const nextWarnings = [];
 
-    if (!isAddress(candidateFormData?.From)) nextErrors.From = 'Source must be a valid 0x address';
-    if (!isAddress(candidateFormData?.To)) nextErrors.To = 'Sink must be a valid 0x address';
+    const fromValid = isAddress(candidateFormData?.From);
+    const toValid = isAddress(candidateFormData?.To);
+    if (!fromValid) nextErrors.From = 'Source must be a valid 0x address';
+    if (!toValid) nextErrors.To = 'Sink must be a valid 0x address';
+    if (fromValid && toValid && candidateFormData.From.toLowerCase() === candidateFormData.To.toLowerCase()) {
+      nextErrors.To = 'Source and sink must be different';
+    }
 
     try {
       const target = BigInt(candidateFormData?.Amount || '0');
