@@ -11,7 +11,7 @@ import { encodeFunctionData, concatHex } from 'viem';
 import cacheService from './cacheService';
 
 export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
-export const STAGING_ENDPOINT = 'https://staging.circlesubi.network/';
+export const STAGING_ENDPOINT = 'https://rpc.staging.aboutcircles.com/';
 
 const fetchTokenBalancesForAddress = async (address) => {
   const res = await fetch(API_ENDPOINT, {

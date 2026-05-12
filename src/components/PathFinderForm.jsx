@@ -356,7 +356,7 @@ const PathFinderForm = ({
             onToggle={handleStagingToggle}
             label="Use Staging Endpoint"
           />
-          <InfoTip text={`Prod: rpc.aboutcircles.com\nStaging: staging.circlesubi.network\n\nCurrently using: ${formData.UseStaging ? 'staging.circlesubi.network' : 'rpc.aboutcircles.com'}`} />
+          <InfoTip text={`Prod: rpc.aboutcircles.com\nStaging: rpc.staging.aboutcircles.com\n\nCurrently using: ${formData.UseStaging ? 'rpc.staging.aboutcircles.com' : 'rpc.aboutcircles.com'}`} />
         </div>
         <div className="flex items-center opacity-40 pointer-events-none" title="Not yet supported by SDK">
           <ToggleSwitch
