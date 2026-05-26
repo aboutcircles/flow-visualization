@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-react';
 import * as SliderPrimitive from '@radix-ui/react-slider';
+import { checksumAddr } from '@/lib/utils';
 
 const SankeyVisualization = forwardRef(({ 
   pathData,
@@ -290,7 +291,11 @@ const SankeyVisualization = forwardRef(({
     }
 
     // Prepare node labels
-    const shortAddr = (addr) => addr.startsWith('0x') ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
+    const shortAddr = (addr) => {
+      if (!addr?.startsWith('0x')) return addr || '';
+      const cs = checksumAddr(addr);
+      return `${cs.slice(0, 6)}...${cs.slice(-4)}`;
+    };
     const nodesWithLabels = nodes.map(node => {
       const profile = nodeProfiles[node.realAddress];
       let label = (showNames && profile?.name) ? profile.name : shortAddr(node.realAddress);

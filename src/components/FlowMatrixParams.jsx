@@ -9,6 +9,7 @@ import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract
 import { gnosis } from "wagmi/chains";
 import { HUB_ADDRESS } from "@/config/wagmi";
 import { buildSafeFlowMatrixSimulationTx } from "@/services/circlesApi";
+import CopyableAddress from "@/components/ui/copyable-address";
 
 // Just the operateFlowMatrix function ABI
 const OPERATE_FLOW_MATRIX_ABI = [
@@ -540,7 +541,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
 
         {isConnected && (
           <div className="mb-2 text-sm text-gray-600">
-            Connected: {address?.slice(0, 6)}...{address?.slice(-4)}
+            Connected: <CopyableAddress address={address} />
             {chain && ` (${chain.name})`}
           </div>
         )}

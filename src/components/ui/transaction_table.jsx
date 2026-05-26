@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { checksumAddr } from '@/lib/utils';
+import CopyableAddress from '@/components/ui/copyable-address';
 
 const TransactionTable = ({
   routes,
@@ -39,9 +41,9 @@ const TransactionTable = ({
   const shortAddr = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 
   const displayAddr = (addr) => {
-    if (!showNames || !nodeProfiles) return shortAddr(addr);
+    if (!showNames || !nodeProfiles) return shortAddr(checksumAddr(addr));
     const profile = nodeProfiles[addr.toLowerCase()];
-    if (!profile?.name) return shortAddr(addr);
+    if (!profile?.name) return shortAddr(checksumAddr(addr));
     const name = profile.name;
     return name.length > 16 ? name.slice(0, 15) + '…' : name;
   };
@@ -168,11 +170,11 @@ const TransactionTable = ({
                       <td></td>
                       <td className="pl-6 pr-2 py-2 text-gray-300">↳</td>
                       <td className="px-4 py-2 break-all" colSpan={2}>
-                        <span className={`text-gray-500 ${showNames ? '' : 'font-mono'}`}>{displayAddr(edge.from)}</span>
+                        <CopyableAddress address={edge.from} label={showNames ? nodeProfiles?.[edge.from?.toLowerCase()]?.name : undefined} className="text-gray-500 text-xs" />
                         <span className="mx-1 text-gray-400">→</span>
-                        <span className={`text-gray-500 ${showNames ? '' : 'font-mono'}`}>{displayAddr(edge.to)}</span>
+                        <CopyableAddress address={edge.to} label={showNames ? nodeProfiles?.[edge.to?.toLowerCase()]?.name : undefined} className="text-gray-500 text-xs" />
                         <span className="ml-2 text-gray-400">token:</span>
-                        <span className="ml-1 text-gray-500 font-mono">{shortAddr(edge.tokenOwner)}</span>
+                        <CopyableAddress address={edge.tokenOwner} className="ml-1 text-gray-500 text-xs" />
                         {renderTokenBadges(edge)}
                       </td>
                       <td className="px-4 py-2 text-gray-500">{formatValue(edge.flow)}</td>

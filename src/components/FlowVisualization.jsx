@@ -16,6 +16,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, GripHorizontal, User, Hash } from 'lucide-react';
+import { checksumAddr } from '@/lib/utils';
+import CopyableAddress from '@/components/ui/copyable-address';
 import InfoTip from '@/components/ui/info-tip';
 import PathStats from '@/components/PathStats';
 
@@ -640,6 +642,7 @@ const FlowVisualization = () => {
   // --- Route-based flow decomposition ---
   const [routes, setRoutes] = useState([]);
   const [selectedRouteIds, setSelectedRouteIds] = useState(new Set());
+  const [removalHistory, setRemovalHistory] = useState([]); // undo stack for node removals
 
   // Decompose into routes when pathData changes
   useEffect(() => {
@@ -653,6 +656,7 @@ const FlowVisualization = () => {
     const decomposed = decomposeFlow(pathData.transfers, source, sink);
     setRoutes(decomposed);
     setSelectedRouteIds(new Set(decomposed.map(r => r.id)));
+    setRemovalHistory([]);
   }, [pathData, formData.From, formData.To]);
 
   // Skip next slider effect after manual toggle (prevents overwrite)
@@ -718,18 +722,14 @@ const FlowVisualization = () => {
     if (id === source || id === sink) return;
 
     resetSliderToFull();
-    setSelectedRouteIds(prev => {
-      const next = new Set(prev);
-      for (const route of routes) {
-        if (!next.has(route.id)) continue;
-        const passesThrough = route.edges.some(
-          e => e.from === id || e.to === id
-        );
-        if (passesThrough) next.delete(route.id);
-      }
-      return next;
-    });
-  }, [routes, formData, resetSliderToFull]);
+    const next = new Set(selectedRouteIds);
+    for (const route of routes) {
+      if (!next.has(route.id)) continue;
+      if (route.edges.some(e => e.from === id || e.to === id)) next.delete(route.id);
+    }
+    setRemovalHistory(h => [...h, selectedRouteIds]);
+    setSelectedRouteIds(next);
+  }, [routes, formData, resetSliderToFull, selectedRouteIds]);
 
   // Build filtered path data from selected routes
   const filteredPathData = useMemo(() => {
@@ -879,6 +879,24 @@ const FlowVisualization = () => {
                     className="rounded-l-none"
                   >
                     Sankey
+                  </Button>
+                </div>
+              )}
+
+              {/* Undo node removal */}
+              {removalHistory.length > 0 && (
+                <div className="absolute top-14 right-4 z-10">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="bg-white shadow-sm text-xs gap-1.5"
+                    onClick={() => {
+                      const prev = removalHistory[removalHistory.length - 1];
+                      setSelectedRouteIds(prev);
+                      setRemovalHistory(h => h.slice(0, -1));
+                    }}
+                  >
+                    ↩ Undo removal
                   </Button>
                 </div>
               )}
@@ -1163,13 +1181,12 @@ const FlowVisualization = () => {
                                       const cadence = typeof row?.isInflationary === 'boolean' ? (row.isInflationary ? 'Static' : 'Demurraged') : null;
                                       const ownerAddress = row?.tokenOwner || '';
                                       const ownerProfile = tokenOwnerProfiles?.[ownerAddress.toLowerCase()];
-                                      const ownerDisplay = showNames ? (ownerProfile?.name || `${ownerAddress.slice(0, 6)}…${ownerAddress.slice(-4)}`) : `${ownerAddress.slice(0, 6)}…${ownerAddress.slice(-4)}`;
 
                                       return (
                                         <tr key={`${row.tokenAddress}-${row.tokenOwner}`} className="hover:bg-gray-50">
                                           <td className="px-3 py-2"><input type="checkbox" checked={isQuickTokenSelected(row.tokenAddress)} onChange={() => toggleQuickToken(row.tokenAddress)} className="rounded border-gray-300" title="Include this source token in quick fromTokens filter" /></td>
-                                          <td className="px-3 py-2 font-mono text-[11px] text-gray-700">{row.tokenAddress?.slice(0, 6)}…{row.tokenAddress?.slice(-4)}</td>
-                                          <td className={`px-3 py-2 text-[11px] text-gray-600 ${showNames ? '' : 'font-mono'}`}>{ownerDisplay}</td>
+                                          <td className="px-3 py-2 text-[11px] text-gray-700"><CopyableAddress address={row.tokenAddress} /></td>
+                                          <td className="px-3 py-2 text-[11px] text-gray-600"><CopyableAddress address={ownerAddress} label={showNames && ownerProfile?.name ? ownerProfile.name : undefined} className={showNames && ownerProfile?.name ? '' : 'font-mono'} /></td>
                                           <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.circles)}</td>
                                           <td className="px-3 py-2 text-right text-gray-700">{formatBalanceNum(row.staticCircles)}</td>
                                           <td className="px-3 py-2">
@@ -1228,14 +1245,11 @@ const FlowVisualization = () => {
                                     {sinkTrustRows.map((row) => {
                                       const avatarAddress = row?.tokenAddress || '';
                                       const profile = tokenOwnerProfiles?.[avatarAddress.toLowerCase()];
-                                      const avatarDisplay = showNames
-                                        ? (profile?.name || `${avatarAddress.slice(0, 6)}…${avatarAddress.slice(-4)}`)
-                                        : `${avatarAddress.slice(0, 6)}…${avatarAddress.slice(-4)}`;
                                       return (
                                         <tr key={avatarAddress} className="hover:bg-gray-50">
                                           <td className="px-3 py-2"><input type="checkbox" checked={isQuickSinkTokenSelected(avatarAddress)} onChange={() => toggleQuickSinkToken(avatarAddress)} className="rounded border-gray-300" title="Include this sink-trusted avatar in quick toTokens filter" /></td>
-                                          <td className="px-3 py-2 font-mono text-[11px] text-gray-700">{avatarAddress.slice(0, 6)}…{avatarAddress.slice(-4)}</td>
-                                          <td className={`px-3 py-2 text-[11px] text-gray-600 ${showNames ? '' : 'font-mono'}`}>{avatarDisplay}</td>
+                                          <td className="px-3 py-2 text-[11px] text-gray-700"><CopyableAddress address={avatarAddress} /></td>
+                                          <td className="px-3 py-2 text-[11px] text-gray-600"><CopyableAddress address={avatarAddress} label={showNames && profile?.name ? profile.name : undefined} className={showNames && profile?.name ? '' : 'font-mono'} /></td>
                                           <td className="px-3 py-2 text-right text-gray-700">{row.relation || 'trusts'}</td>
                                         </tr>
                                       );
