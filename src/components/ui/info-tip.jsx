@@ -1,24 +1,31 @@
-import React, { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Info } from 'lucide-react';
 
 const InfoTip = ({ text, size = 14 }) => {
-  const [visible, setVisible] = useState(false);
-  const [position, setPosition] = useState('below');
+  const [tooltipStyle, setTooltipStyle] = useState(null);
   const buttonRef = useRef(null);
 
   const show = useCallback(() => {
-    if (buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      // Show below only if too close to top of viewport, above otherwise
-      setPosition(rect.top < 120 ? 'below' : 'above');
-    }
-    setVisible(true);
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const useAbove = spaceBelow < 120 && rect.top > 120;
+    setTooltipStyle({
+      position: 'fixed',
+      left: rect.left + rect.width / 2,
+      ...(useAbove
+        ? { bottom: window.innerHeight - rect.top + 8 }
+        : { top: rect.bottom + 8 }),
+      transform: 'translateX(-50%)',
+      width: 'min(240px, 60vw)',
+      zIndex: 9999,
+    });
   }, []);
 
-  const hide = useCallback(() => setVisible(false), []);
+  const hide = useCallback(() => setTooltipStyle(null), []);
 
   return (
-    <span className="relative inline-flex items-center ml-1">
+    <span className="relative inline-flex items-center ml-1 align-middle">
       <button
         ref={buttonRef}
         type="button"
@@ -31,13 +38,11 @@ const InfoTip = ({ text, size = 14 }) => {
       >
         <Info size={size} />
       </button>
-      {visible && (
+      {tooltipStyle && (
         <span
           role="tooltip"
-          className={`absolute z-50 block bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg pointer-events-none ${
-            position === 'above' ? 'bottom-full mb-2' : 'top-full mt-2'
-          }`}
-          style={{ left: '50%', transform: 'translateX(-50%)', width: 'min(240px, 60vw)' }}
+          className="block bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg pointer-events-none"
+          style={tooltipStyle}
         >
           {text}
         </span>

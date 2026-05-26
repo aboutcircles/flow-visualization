@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { checksumAddress } from 'viem';
 
 /**
  * Combines multiple class names using clsx and tailwind-merge
@@ -7,6 +8,10 @@ import { twMerge } from 'tailwind-merge';
 export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
+
+export const checksumAddr = (addr) => {
+  try { return checksumAddress(addr); } catch { return addr; }
+};
 
 /**
  * Packs coordinates into bytes as required by the operateFlowMatrix function

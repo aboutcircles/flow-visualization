@@ -3,6 +3,33 @@ import cytoscape from 'cytoscape';
 import klay from 'cytoscape-klay';
 import dagre from 'cytoscape-dagre';
 import { usePerformance } from '@/contexts/PerformanceContext';
+import { checksumAddr } from '@/lib/utils';
+
+function computeBFSLayers(transfers, source, sink) {
+  const adj = {};
+  for (const t of transfers) {
+    const from = t.from.toLowerCase();
+    const to = t.to.toLowerCase();
+    (adj[from] ||= new Set()).add(to);
+  }
+  const layer = { [source]: 0 };
+  const queue = [source];
+  while (queue.length) {
+    const n = queue.shift();
+    for (const next of (adj[n] || [])) {
+      if (!(next in layer)) { layer[next] = layer[n] + 1; queue.push(next); }
+    }
+  }
+  // Sink must be the rightmost layer — beyond every non-sink node
+  if (sink && sink in layer) {
+    const maxNonSink = Math.max(
+      ...Object.entries(layer).filter(([k]) => k !== sink).map(([, v]) => v),
+      0
+    );
+    layer[sink] = maxNonSink + 1;
+  }
+  return layer;
+}
 
 // Register layout extensions
 cytoscape.use(klay);
@@ -24,12 +51,14 @@ export const useCytoscape = ({
   onTooltip,
   onTransactionSelect,
   onNodeRemove,
-  layoutName = 'klay',
+  onNodeMenu,
+  layoutName = 'bfs-tiered',
   showNames = true
 }) => {
   const cyRef = useRef(null);
   const isInitializingRef = useRef(false);
   const onNodeRemoveRef = useRef(onNodeRemove);
+  const bfsNodePositionsRef = useRef({});
   const nodeProfilesRef = useRef(nodeProfiles);
   const tokenOwnerProfilesRef = useRef(tokenOwnerProfiles);
   const balancesByAccountRef = useRef(balancesByAccount);
@@ -229,12 +258,42 @@ export const useCytoscape = ({
       // Add label
       if (config.rendering.features.nodeLabels) {
         const profile = nodeProfiles[id];
-        const shortAddr = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        const displayId = checksumAddr(id);
+        const shortAddr = `${displayId.slice(0, 6)}...${displayId.slice(-4)}`;
         nodeData.label = (showNames && profile?.name) ? profile.name : shortAddr;
       }
 
       return { data: nodeData };
     });
+
+    // Compute BFS-tier positions (stored in ref so runLayout can reuse them)
+    {
+      // Use graph-theoretic source for BFS — the form's From may not be in the transfer graph
+      const bfsSource = onlySourceAddresses[0] || finalSource;
+      const bfsSink = onlySinkAddresses[0] || finalSink;
+      const bfsLayers = computeBFSLayers(pathData.transfers, bfsSource, bfsSink);
+      const layerGroups = {};
+      Array.from(connectedNodes).forEach(id => {
+        const l = bfsLayers[id] ?? 0;
+        (layerGroups[l] ||= []).push(id);
+      });
+      const layerXSpacing = 220;
+      const nodeYSpacing = 80;
+      const positions = {};
+      const sortedLayers = Object.entries(layerGroups).sort(([a], [b]) => +a - +b);
+      const sourceLayer = 0;
+      const sinkLayer = sortedLayers[sortedLayers.length - 1]?.[0];
+      sortedLayers.forEach(([layer, ids]) => {
+        const x = +layer * layerXSpacing;
+        const isEndpoint = layer === String(sourceLayer) || layer === sinkLayer;
+        // Odd-count intermediate layers get a half-step offset so no node lands at y=0
+        const offset = (!isEndpoint && ids.length % 2 === 1) ? nodeYSpacing / 2 : 0;
+        ids.forEach((id, i) => {
+          positions[id] = { x, y: (i - (ids.length - 1) / 2) * nodeYSpacing + offset };
+        });
+      });
+      bfsNodePositionsRef.current = positions;
+    }
 
     try {
       // More thorough cleanup of previous instance
@@ -448,7 +507,6 @@ export const useCytoscape = ({
               minNodeSpacing: isVeryLarge ? 10 : 30
             };
           case 'klay':
-          default:
             return {
               ...baseConfig,
               name: 'klay',
@@ -460,6 +518,18 @@ export const useCytoscape = ({
                 edgeRouting: 'POLYLINE'
               }
             };
+          case 'bfs-tiered':
+          default: {
+            const pos = bfsNodePositionsRef.current;
+            return {
+              name: 'preset',
+              positions: (node) => pos[node.id()] ?? { x: 0, y: 0 },
+              fit: true,
+              padding: isVeryLarge ? 10 : 30,
+              animate: false,
+              ready: () => { if (cyRef.current) { cyRef.current.resize(); cyRef.current.center(); } }
+            };
+          }
         }
       };
 
@@ -612,35 +682,31 @@ export const useCytoscape = ({
         navigator.clipboard.writeText(text).then(() => {
           onTooltip({ text: `Copied: ${text}`, position: { x: position.x, y: position.y } });
           setTimeout(() => onTooltip({ text: '', position: null }), 1500);
-        });
+        }).catch(() => {});
       };
-      cy.on('cxttap', 'node', (event) => {
-        copyToClipboard(event.target.id(), event.renderedPosition);
-      });
       cy.on('cxttap', 'edge', (event) => {
         const d = event.target.data();
         copyToClipboard(d.tokenOwner || `${d.source}→${d.target}`, event.renderedPosition);
       });
 
-      // Node click: remove node and its chain from selection
-      if (onNodeRemoveRef.current) {
-        cy.on('click', 'node', (event) => {
-          const node = event.target;
-          if (node.data('isSource') || node.data('isSink') || node.data('isSameSourceSink')) return;
-          onNodeRemoveRef.current?.(node.id());
+      // Node click: open context menu
+      cy.on('click', 'node', (event) => {
+        const node = event.target;
+        const pos = event.renderedPosition;
+        onNodeMenu?.({
+          id: node.id(),
+          position: { x: pos.x, y: pos.y },
+          isIntermediate: !node.data('isSource') && !node.data('isSink') && !node.data('isSameSourceSink'),
         });
+      });
 
-        // Visual cue: pointer cursor on removable intermediate nodes
-        cy.on('mouseover', 'node', (event) => {
-          const node = event.target;
-          if (!node.data('isSource') && !node.data('isSink') && !node.data('isSameSourceSink')) {
-            containerRef.current.style.cursor = 'pointer';
-          }
-        });
-        cy.on('mouseout', 'node', () => {
-          containerRef.current.style.cursor = '';
-        });
-      }
+      // Visual cue: pointer cursor on all nodes
+      cy.on('mouseover', 'node', () => {
+        if (containerRef.current) containerRef.current.style.cursor = 'pointer';
+      });
+      cy.on('mouseout', 'node', () => {
+        if (containerRef.current) containerRef.current.style.cursor = '';
+      });
 
       const renderTime = performance.now() - startTime;
       updateStats({ renderTime: Math.round(renderTime) });
@@ -717,7 +783,8 @@ export const useCytoscape = ({
       cy.nodes().forEach((node) => {
         const id = node.id();
         const profile = nodeProfiles[id];
-        const shortAddr = `${id.slice(0, 6)}...${id.slice(-4)}`;
+        const displayId = checksumAddr(id);
+        const shortAddr = `${displayId.slice(0, 6)}...${displayId.slice(-4)}`;
         node.data('label', (showNames && profile?.name) ? profile.name : shortAddr);
       });
     });
@@ -930,7 +997,6 @@ export const useCytoscape = ({
             minNodeSpacing: isVeryLarge ? 10 : 30
           };
         case 'klay':
-        default:
           return {
             ...baseConfig,
             name: 'klay',
@@ -942,6 +1008,19 @@ export const useCytoscape = ({
               edgeRouting: 'POLYLINE'
             }
           };
+        case 'bfs-tiered':
+        default: {
+          const pos = bfsNodePositionsRef.current;
+          return {
+            name: 'preset',
+            positions: (node) => pos[node.id()] ?? { x: 0, y: 0 },
+            fit: true,
+            padding: isVeryLarge ? 10 : 30,
+            animate: !isVeryLarge && !config.rendering.fastMode,
+            animationDuration: isVeryLarge ? 0 : 300,
+            ready: () => { if (cyRef.current) { cyRef.current.resize(); cyRef.current.center(); } }
+          };
+        }
       }
     };
 

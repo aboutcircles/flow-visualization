@@ -75,6 +75,7 @@ const PathFinderForm = ({
 }) => {
   const fromTokensRef = useRef(null);
   const toTokensRef = useRef(null);
+  const handleFindPathRef = useRef(null);
   const [isSimulationEditorOpen, setIsSimulationEditorOpen] = useState(false);
   const [simulationBalanceRows, setSimulationBalanceRows] = useState([]);
   const [simulationTrustRows, setSimulationTrustRows] = useState([]);
@@ -277,6 +278,21 @@ const PathFinderForm = ({
     onFindPath(fromPending || toPending ? patched : undefined);
   };
 
+  // Keep ref current so the keyboard handler always calls the latest version
+  handleFindPathRef.current = handleFindPath;
+
+  useEffect(() => {
+    if (isSimulationEditorOpen) return; // simulation editor owns Ctrl+Enter while open
+    const onKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !isLoading) {
+        e.preventDefault();
+        handleFindPathRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isSimulationEditorOpen, isLoading]);
+
   return (
     <Card>
       <CardContent className="space-y-4 pt-4">
@@ -472,7 +488,7 @@ const PathFinderForm = ({
           onClick={handleFindPath}
           disabled={isLoading}
         >
-          {isLoading ? 'Finding Path...' : 'Find Path'}
+          {isLoading ? 'Finding Path...' : 'Find Path  ⌘↵'}
         </Button>
 
         {isSimulationEditorOpen && typeof document !== 'undefined' && createPortal(

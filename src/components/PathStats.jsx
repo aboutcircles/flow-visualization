@@ -1,6 +1,7 @@
 import React from 'react';
 import { Card } from '@/components/ui/card';
 import { calculateAllMetrics } from '@/components/metrics';
+import { checksumAddr } from '@/lib/utils';
 
 const shortAddr = (addr) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 
@@ -10,9 +11,9 @@ const RouteSelector = ({ routes, selectedRouteIds, onToggleRoute, onToggleAllRou
   const someSelected = selectedRouteIds.size > 0 && selectedRouteIds.size < routes.length;
 
   const displayAddr = (addr) => {
-    if (!showNames || !nodeProfiles) return shortAddr(addr);
+    if (!showNames || !nodeProfiles) return shortAddr(checksumAddr(addr));
     const profile = nodeProfiles[addr.toLowerCase()];
-    if (!profile?.name) return shortAddr(addr);
+    if (!profile?.name) return shortAddr(checksumAddr(addr));
     const name = profile.name;
     return name.length > 16 ? name.slice(0, 15) + '…' : name;
   };

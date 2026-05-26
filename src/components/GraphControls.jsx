@@ -22,6 +22,7 @@ const GraphControls = ({
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
 
   const layouts = [
+    { id: 'bfs-tiered', name: 'BFS Tiered', description: 'Source → tiers → sink columns' },
     { id: 'klay', name: 'Klay (Hierarchical)', description: 'Best for flow visualization' },
     { id: 'dagre', name: 'Dagre (Layered)', description: 'Clear left-to-right flow' },
     { id: 'breadthfirst', name: 'Breadth First', description: 'Tree-like structure' },

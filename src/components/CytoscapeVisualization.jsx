@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { checksumAddr } from '@/lib/utils';
 import { useCytoscape } from '@/hooks/useCytoscape';
 import { usePerformance } from '@/contexts/PerformanceContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { Button } from '@/components/ui/button';
 import { 
   ZoomIn, 
@@ -32,7 +34,8 @@ const CytoscapeVisualization = forwardRef(({
 }, ref) => {
   const containerRef = useRef(null);
   const [tooltip, setTooltip] = useState({ text: '', position: null });
-  const [layoutName, setLayoutName] = useState('klay');
+  const [nodeMenu, setNodeMenu] = useState(null); // { id, position, isIntermediate }
+  const [layoutName, setLayoutName] = usePersistedState('graph-layout', 'bfs-tiered');
   const [highlightedPath, setHighlightedPath] = useState(null);
   const { config } = usePerformance();
   
@@ -61,6 +64,7 @@ const CytoscapeVisualization = forwardRef(({
     onTooltip: setTooltip,
     onTransactionSelect,
     onNodeRemove,
+    onNodeMenu: setNodeMenu,
     layoutName,
     showNames
   });
@@ -177,6 +181,7 @@ const CytoscapeVisualization = forwardRef(({
               onChange={(e) => handleLayoutChange(e.target.value)}
               className="text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
+              <option value="bfs-tiered">BFS Tiered</option>
               <option value="klay">Klay</option>
               <option value="hierarchical">Hierarchical</option>
               <option value="dagre">Dagre</option>
@@ -212,6 +217,43 @@ const CytoscapeVisualization = forwardRef(({
         </div>
       )}
       
+      {/* Node context menu */}
+      {nodeMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setNodeMenu(null)} />
+          <div
+            className="absolute z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[170px]"
+            style={{ left: nodeMenu.position.x + 8, top: nodeMenu.position.y + 8 }}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-gray-400 border-b border-gray-100 font-mono">
+              {checksumAddr(nodeMenu.id)}
+            </div>
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => {
+                navigator.clipboard.writeText(checksumAddr(nodeMenu.id)).catch(() => {});
+                setNodeMenu(null);
+              }}
+            >
+              <span>📋</span> Copy Address
+            </button>
+            {nodeMenu.isIntermediate && onNodeRemove && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                onClick={() => {
+                  onNodeRemove(nodeMenu.id);
+                  setNodeMenu(null);
+                }}
+              >
+                <span>✕</span> Remove from Graph
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Tooltip */}
       {tooltip.text && tooltip.position && (
         <div
