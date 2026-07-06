@@ -395,21 +395,21 @@ const PathFinderForm = ({
             <InfoTip text="Route pathfinding and fork execution through the Circles test environment: pin to a past block and run the resulting transfer on an Anvil fork. Reveals the Block Number field and the Execute-on-fork button." />
           </div>
         )}
-        <div className="flex items-center opacity-40 pointer-events-none" title="Not yet supported by SDK">
+        <div className="flex items-center">
           <ToggleSwitch
             isEnabled={formData.QuantizedMode}
             onToggle={handleQuantizedModeToggle}
             label="Quantized Mode"
           />
-          <InfoTip text="Not yet supported — awaiting SDK update. Will enable 96 CRC quantization semantics." />
+          <InfoTip text="Invitation module: forces every sink-bound transfer to be exactly N × 96 CRC. The number of invites is derived from the value (invites = value / 96 CRC). Use a very large value to discover all possible invites. Leave off for ordinary transfers." />
         </div>
-        <div className="flex items-center opacity-40 pointer-events-none" title="Not yet supported by SDK">
+        <div className="flex items-center">
           <ToggleSwitch
             isEnabled={formData.DebugShowIntermediateSteps}
             onToggle={handleDebugIntermediateToggle}
             label="Debug Intermediate Steps"
           />
-          <InfoTip text="Not yet supported — awaiting SDK update. Will request intermediate debug details from pathfinder." />
+          <InfoTip text="Returns the pathfinder's transformation stages (raw paths → collapsed → router-inserted → sorted). When on and a path is found, a 'Pipeline' tab appears in the results with each stage." />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Max Transfers</label>

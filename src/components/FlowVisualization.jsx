@@ -20,6 +20,7 @@ import { checksumAddr } from '@/lib/utils';
 import CopyableAddress from '@/components/ui/copyable-address';
 import InfoTip from '@/components/ui/info-tip';
 import PathStats from '@/components/PathStats';
+import DebugStagesView from '@/components/DebugStagesView';
 
 const FlowVisualization = () => {
   const [isCollapsed, setIsCollapsed] = usePersistedState('panel-collapsed', false);
@@ -1043,6 +1044,14 @@ const FlowVisualization = () => {
                       >
                         Path Stats
                       </TabsTrigger>
+                      {pathData?.debug && (
+                        <TabsTrigger
+                          isActive={activeTab === 'debug'}
+                          onClick={() => setActiveTab('debug')}
+                        >
+                          Pipeline
+                        </TabsTrigger>
+                      )}
                     </TabsList>
                     <div className="flex rounded-md shadow-sm text-xs">
                       <button
@@ -1304,6 +1313,11 @@ const FlowVisualization = () => {
                         showNames={showNames}
                       />
                     </TabsContent>
+                    {pathData?.debug && (
+                      <TabsContent isActive={activeTab === 'debug'} className="h-full overflow-auto">
+                        <DebugStagesView debug={pathData.debug} />
+                      </TabsContent>
+                    )}
                   </div>
                 </Tabs>
               </div>
