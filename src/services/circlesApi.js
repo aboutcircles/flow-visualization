@@ -117,6 +117,51 @@ export const ethToWei = (crcAmount) => {
   }
 };
 
+// SDK WORKAROUND (remove once @aboutcircles/sdk-rpc supports these fields):
+// Mirrors the SDK's normalizeFindPathParams (PascalCase RPC shape) and adds the three
+// fields the SDK whitelist drops but the backend FlowRequest DTO supports: quantizedMode,
+// debugShowIntermediateSteps, simulatedConsentedAvatars. The RPC binds FlowRequest
+// case-insensitively (the SDK itself sends PascalCase against camelCase JsonPropertyNames),
+// so PascalCase keys resolve. Keep this in lockstep with normalizeFindPathParams until the
+// SDK exposes the missing fields, at which point this helper and its caller are deleted.
+const buildFindPathRpcRequest = (params) => {
+  const request = {
+    Source: params.from,
+    Sink: params.to,
+    TargetFlow: params.targetFlow.toString(),
+    WithWrap: params.useWrappedBalances,
+    // Fields the SDK whitelist drops:
+    QuantizedMode: params.quantizedMode === true,
+    DebugShowIntermediateSteps: params.debugShowIntermediateSteps === true,
+  };
+
+  if (params.fromTokens) request.FromTokens = params.fromTokens;
+  if (params.toTokens) request.ToTokens = params.toTokens;
+  if (params.excludeFromTokens) request.ExcludedFromTokens = params.excludeFromTokens;
+  if (params.excludeToTokens) request.ExcludedToTokens = params.excludeToTokens;
+  if (params.maxTransfers !== undefined) request.MaxTransfers = params.maxTransfers;
+
+  if (params.simulatedBalances) {
+    request.SimulatedBalances = params.simulatedBalances.map((balance) => ({
+      Holder: balance.holder,
+      Token: balance.token,
+      Amount: balance.amount.toString(),
+      IsWrapped: balance.isWrapped,
+      IsStatic: balance.isStatic,
+    }));
+  }
+  if (params.simulatedTrusts) {
+    request.SimulatedTrusts = params.simulatedTrusts.map((trust) => ({
+      Truster: trust.truster,
+      Trustee: trust.trustee,
+    }));
+  }
+  // Also SDK-dropped, but backend-supported (FlowRequest.SimulatedConsentedAvatars):
+  if (params.simulatedConsentedAvatars) request.SimulatedConsentedAvatars = params.simulatedConsentedAvatars;
+
+  return request;
+};
+
 export const findPath = async (formData, sdkRpc) => {
   // Endpoint precedence: block-pinned test-env session > staging toggle > default (head).
   // A pinned session routes RPC (and thus circlesV2_findPath → pathfinder) through the
@@ -196,10 +241,19 @@ export const findPath = async (formData, sdkRpc) => {
 
     console.log('SDK findPath params:', params);
 
-    const result = await rpc.pathfinder.findPath(params);
+    // SDK WORKAROUND (remove once @aboutcircles/sdk-rpc supports these fields):
+    // rpc.pathfinder.findPath() runs params through normalizeFindPathParams, which
+    // WHITELISTS fields and silently drops quantizedMode, debugShowIntermediateSteps and
+    // simulatedConsentedAvatars — even though the backend (circlesV2_findPath → FlowRequest)
+    // supports all three. We issue the call through the SDK's own low-level client with a
+    // request that mirrors normalizeFindPathParams PLUS the dropped fields, so the transport
+    // (URL, JSON-RPC framing, param-array shape) stays identical to the SDK's.
+    //   To switch back when the SDK adds them: delete buildFindPathRpcRequest and restore
+    //   `const result = await rpc.pathfinder.findPath(params);`.
+    const result = await rpc.client.call('circlesV2_findPath', [buildFindPathRpcRequest(params)]);
 
-    // SDK returns bigints — convert to strings for backward compatibility,
-    // including optional debug/simulation payloads.
+    // The raw response already carries string-encoded numbers; stringifyBigInts is a no-op on
+    // strings and recurses the optional `debug` (pipeline stages) / simulation payloads.
     return stringifyBigInts(result);
   } catch (err) {
     console.error('SDK findPath error:', err);
@@ -313,6 +367,9 @@ export const processPath = async (rawPath, sourceAddress) => {
       ...t,
       value: t.value.toString(),
     })),
+    // Pass through the raw pipeline stages untouched (debugShowIntermediateSteps). Wrapper
+    // resolution deliberately does NOT rewrite them — the Pipeline tab shows the raw stages.
+    debug: rawPath.debug,
     _meta: {
       hasWrappedTokens,
       wrappedTokenCount: Object.keys(wrappedTokensInPath).length,
