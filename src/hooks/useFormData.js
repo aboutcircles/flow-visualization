@@ -42,6 +42,7 @@ const DEFAULTS = {
   SimulatedBalances: '[]',
   SimulatedTrusts: '[]',
   SimulatedConsentedAvatars: '',
+  BlockNumber: '',
 };
 
 const isAddress = (value) => typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value.trim());
@@ -98,6 +99,7 @@ export const useFormData = () => {
         name === 'fromTokens' ? 'FromTokens' :
         name === 'toTokens' ? 'ToTokens' :
         name === 'maxTransfers' ? 'MaxTransfers' :
+        name === 'blockNumber' ? 'BlockNumber' :
         name;
 
       // Clear token filters when addresses change (stale filters cause empty results)

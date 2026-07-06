@@ -1272,6 +1272,7 @@ const FlowVisualization = () => {
                         showProcessed={showProcessed}
                         isFiltered={!!filteredPathData}
                         view="params"
+                        blockNumber={formData.BlockNumber}
                       />
                     </TabsContent>
 

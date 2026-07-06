@@ -9,9 +9,17 @@ import {
 } from "@aboutcircles/sdk-pathfinder";
 import { encodeFunctionData, concatHex } from 'viem';
 import cacheService from './cacheService';
+import { getTestEnvSession, anvilRpc, decodeRevert, isTestEnvConfigured } from './testEnv';
 
-export const API_ENDPOINT = 'https://rpc.aboutcircles.com/';
-export const STAGING_ENDPOINT = 'https://rpc.staging.aboutcircles.com/';
+export const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || 'https://rpc.aboutcircles.com/';
+export const STAGING_ENDPOINT = import.meta.env.VITE_STAGING_ENDPOINT || 'https://rpc.staging.aboutcircles.com/';
+
+// Positive integer block number from form input, or null (→ live/head).
+export const parseBlockNumber = (value) => {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
 
 const fetchTokenBalancesForAddress = async (address) => {
   const res = await fetch(API_ENDPOINT, {
@@ -110,9 +118,19 @@ export const ethToWei = (crcAmount) => {
 };
 
 export const findPath = async (formData, sdkRpc) => {
-  // If staging endpoint requested, create a temporary SDK client for it
-  const endpoint = formData.UseStaging ? STAGING_ENDPOINT : API_ENDPOINT;
-  const rpc = formData.UseStaging ? new CirclesRpc(STAGING_ENDPOINT) : sdkRpc;
+  // Endpoint precedence: block-pinned test-env session > staging toggle > default (head).
+  // A pinned session routes RPC (and thus circlesV2_findPath → pathfinder) through the
+  // proxy that injects X-Max-Block-Number, so the path resolves against that past block.
+  const blockNumber = parseBlockNumber(formData.BlockNumber);
+  let rpc;
+  if (blockNumber && isTestEnvConfigured()) {
+    const session = await getTestEnvSession(blockNumber);
+    rpc = new CirclesRpc(session.rpcUrl);
+  } else if (formData.UseStaging) {
+    rpc = new CirclesRpc(STAGING_ENDPOINT);
+  } else {
+    rpc = sdkRpc;
+  }
   try {
     // Include and exclude can coexist when quick-filter sends both
     const fromTokensArray = formData.IsFromTokensExcluded
@@ -187,6 +205,44 @@ export const findPath = async (formData, sdkRpc) => {
     console.error('SDK findPath error:', err);
     throw err;
   }
+};
+
+/**
+ * Execute a pathfinder-computed operateFlowMatrix call on the session's Anvil fork of the
+ * pinned block and report whether it reverts. Uses eth_call from the flow source (no
+ * signature needed on a fork); the fork state matches the block the path was computed at,
+ * so a revert means the pathfinder produced a path that would fail on-chain.
+ * Returns { success, gasUsed?, revertReason? }.
+ */
+export const executeFlowMatrixOnFork = async ({ blockNumber, source, hubAddress, calldata }) => {
+  const block = parseBlockNumber(blockNumber);
+  if (!block) throw new Error('A positive block number is required to execute on the fork.');
+  if (!source || !hubAddress || !calldata) throw new Error('Missing source, hub address, or calldata.');
+
+  const session = await getTestEnvSession(block);
+  const tx = { from: source, to: hubAddress, data: calldata };
+
+  try {
+    await anvilRpc(session.anvilUrl, 'eth_call', [tx, 'latest']);
+  } catch (err) {
+    // Only a genuine contract revert is a "would-fail-on-chain" signal. Infra failures
+    // (network, HTTP, timeout, expired session) are rethrown so the UI shows "couldn't
+    // run" rather than a misleading revert that looks like a pathfinder bug.
+    if (err?.kind === 'revert') {
+      return { success: false, revertReason: decodeRevert(err) };
+    }
+    throw err;
+  }
+
+  // Succeeded — best-effort gas estimate for display (never fail the result on this).
+  let gasUsed = null;
+  try {
+    const gasHex = await anvilRpc(session.anvilUrl, 'eth_estimateGas', [tx]);
+    gasUsed = gasHex ? BigInt(gasHex).toString() : null;
+  } catch {
+    // gas is informational only
+  }
+  return { success: true, gasUsed };
 };
 
 export const processPath = async (rawPath, sourceAddress) => {

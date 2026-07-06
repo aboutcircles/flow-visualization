@@ -8,6 +8,7 @@ import TokenInput from '@/components/ui/token-input';
 import ToggleSwitch from '@/components/ui/toggle-switch';
 import InfoTip from '@/components/ui/info-tip';
 import { parseAddressList } from '@/services/circlesApi';
+import { isTestEnvConfigured } from '@/services/testEnv';
 import * as SliderPrimitive from '@radix-ui/react-slider';
 
 const BALANCES_GRID_COLUMNS = ['holder', 'token', 'amount', 'isWrapped', 'isStatic'];
@@ -400,6 +401,21 @@ const PathFinderForm = ({
             type="number"
           />
         </div>
+        {isTestEnvConfigured() && (
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Block Number (time-travel)
+              <InfoTip text="Pin the pathfinder and graph to a past block via a test-env session. Leave empty for latest." />
+            </label>
+            <Input
+              name="blockNumber"
+              value={formData.BlockNumber}
+              onChange={handleInputChange}
+              placeholder="latest"
+              type="number"
+            />
+          </div>
+        )}
         <div className="space-y-2">
           <label className="block text-sm font-medium mb-1">
             Simulations
@@ -632,6 +648,7 @@ PathFinderForm.propTypes = {
     WithWrap: PropTypes.bool.isRequired,
     UseStaging: PropTypes.bool.isRequired,
     MaxTransfers: PropTypes.string,
+    BlockNumber: PropTypes.string,
     IsFromTokensExcluded: PropTypes.bool.isRequired,
     IsToTokensExcluded: PropTypes.bool.isRequired,
     QuantizedMode: PropTypes.bool.isRequired,

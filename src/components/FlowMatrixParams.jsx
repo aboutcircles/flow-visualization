@@ -8,7 +8,7 @@ import { encodeFunctionData } from "viem";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from "wagmi";
 import { gnosis } from "wagmi/chains";
 import { HUB_ADDRESS } from "@/config/wagmi";
-import { buildSafeFlowMatrixSimulationTx } from "@/services/circlesApi";
+import { buildSafeFlowMatrixSimulationTx, executeFlowMatrixOnFork } from "@/services/circlesApi";
 import CopyableAddress from "@/components/ui/copyable-address";
 
 // Just the operateFlowMatrix function ABI
@@ -131,7 +131,7 @@ const resolveSimulationSigner = async ({ publicClient, safeAddress, connectedAdd
   };
 };
 
-const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcessed, isFiltered, view = 'all' }) => {
+const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcessed, isFiltered, view = 'all', blockNumber = '' }) => {
   const showParamsSection = view !== 'simulation';
   const showSimulationSection = view !== 'params';
   const [flowMatrix, setFlowMatrix] = useState(null);
@@ -143,6 +143,9 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
   const [simulationError, setSimulationError] = useState(null);
   const [simulationErrorLog, setSimulationErrorLog] = useState('');
   const [simulationResult, setSimulationResult] = useState(null);
+  const [forkResult, setForkResult] = useState(null);
+  const [isForkRunning, setIsForkRunning] = useState(false);
+  const [forkError, setForkError] = useState(null);
 
   const { address, isConnected, chain } = useAccount();
   const publicClient = usePublicClient();
@@ -398,6 +401,41 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
     }
   };
 
+  // Execute the operateFlowMatrix call on the session's Anvil fork of the pinned block and
+  // report success/revert. No wallet needed — this is an eth_call from the flow source on
+  // a throwaway fork. Only available in time-travel mode (a block is selected).
+  const handleExecuteOnFork = async () => {
+    setForkError(null);
+    setForkResult(null);
+
+    let calldata = null;
+    try {
+      calldata = getCalldata();
+    } catch (err) {
+      setForkError(err?.message || 'Could not build calldata');
+      return;
+    }
+    if (!calldata || !sender) {
+      setForkError('No calldata or source available.');
+      return;
+    }
+
+    setIsForkRunning(true);
+    try {
+      const result = await executeFlowMatrixOnFork({
+        blockNumber,
+        source: sender,
+        hubAddress: HUB_ADDRESS,
+        calldata,
+      });
+      setForkResult(result);
+    } catch (err) {
+      setForkError(err?.message || 'Fork execution failed');
+    } finally {
+      setIsForkRunning(false);
+    }
+  };
+
   if (error && showParamsSection) {
     return (
       <Card className="mt-4">
@@ -486,6 +524,16 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
                   {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
                   {copied.calldata ? "Copied!" : "Calldata"}
                 </Button>
+                {blockNumber && showProcessed && (
+                  <Button
+                    onClick={handleExecuteOnFork}
+                    disabled={isForkRunning || !flowMatrix}
+                    variant="outline"
+                    className="flex items-center gap-1 border-purple-300 text-purple-700 hover:bg-purple-50"
+                  >
+                    {isForkRunning ? 'Running on fork…' : 'Execute on fork'}
+                  </Button>
+                )}
               </>
             )}
             {!isConnected ? (
@@ -557,6 +605,32 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
             Transaction submitted: {hash.slice(0, 10)}...{hash.slice(-8)}
             {isConfirming && " - Confirming..."}
             {isConfirmed && " - Confirmed!"}
+          </div>
+        )}
+
+        {showParamsSection && (forkResult || forkError) && (
+          <div
+            className={`mb-2 p-3 rounded text-sm border ${
+              forkResult?.success
+                ? 'bg-green-50 border-green-200 text-green-900'
+                : 'bg-red-50 border-red-200 text-red-900'
+            }`}
+          >
+            <div className="font-medium">Execute on fork (block {blockNumber})</div>
+            {forkError && <div>Error: {forkError}</div>}
+            {forkResult?.success && (
+              <div>✔ Would succeed on-chain{forkResult.gasUsed ? ` — est. gas ${forkResult.gasUsed}` : ''}.</div>
+            )}
+            {forkResult && !forkResult.success && (
+              <>
+                <div>✖ Reverts: {forkResult.revertReason}</div>
+                <div className="mt-1 text-xs text-red-700">
+                  Note: this runs the bare operateFlowMatrix. Paths that use wrapped balances
+                  (Include Wrapped Tokens) revert here without the unwrap steps — use “Simulate”
+                  for those, or turn off wrapped tokens to validate the direct transfer.
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -761,6 +835,7 @@ FlowMatrixParams.propTypes = {
   showProcessed: PropTypes.bool,
   isFiltered: PropTypes.bool,
   view: PropTypes.oneOf(['all', 'params', 'simulation']),
+  blockNumber: PropTypes.string,
 };
 
 export default FlowMatrixParams;
