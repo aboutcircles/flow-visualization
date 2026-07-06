@@ -210,12 +210,19 @@ export const useFormData = () => {
   };
 
   const handleTestEnvModeToggle = () => {
-    setFormData(prev => ({
-      ...prev,
-      TestEnvMode: !prev.TestEnvMode,
-      // Leaving test-env mode returns pathfinding to head — clear the pinned block.
-      BlockNumber: prev.TestEnvMode ? '' : prev.BlockNumber,
-    }));
+    setFormData(prev => {
+      const enabling = !prev.TestEnvMode;
+      return {
+        ...prev,
+        TestEnvMode: enabling,
+        // Time-travel can ONLY run on the staging test-env (there is no prod test-env),
+        // so enabling it forces the staging endpoint on; disabling returns to prod.
+        // The staging toggle is locked while time-travel is active (see PathFinderForm).
+        UseStaging: enabling ? true : false,
+        // Leaving test-env mode returns pathfinding to head — clear the pinned block.
+        BlockNumber: enabling ? prev.BlockNumber : '',
+      };
+    });
   };
 
   const handleQuantizedModeToggle = () => {

@@ -372,13 +372,18 @@ const PathFinderForm = ({
           />
           <InfoTip text="Allow the pathfinder to use ERC20-wrapped Circles tokens. Wrapped tokens have broader trust acceptance but require unwrap/wrap operations before the on-chain transfer." />
         </div>
-        <div className="flex items-center">
+        <div
+          className={`flex items-center${formData.TestEnvMode ? ' opacity-60 pointer-events-none' : ''}`}
+          title={formData.TestEnvMode ? 'Locked on: time-travel runs on the staging test-env' : undefined}
+        >
           <ToggleSwitch
             isEnabled={formData.UseStaging}
             onToggle={handleStagingToggle}
             label="Use Staging Endpoint"
           />
-          <InfoTip text={`Prod: rpc.aboutcircles.com\nStaging: rpc.staging.aboutcircles.com\n\nCurrently using: ${formData.UseStaging ? 'rpc.staging.aboutcircles.com' : 'rpc.aboutcircles.com'}`} />
+          <InfoTip text={formData.TestEnvMode
+            ? 'Locked on while Test environment (time-travel) is active — time-travel routes through the staging test-env, so prod cannot be used.'
+            : `Prod: rpc.aboutcircles.com\nStaging: rpc.staging.aboutcircles.com\n\nCurrently using: ${formData.UseStaging ? 'rpc.staging.aboutcircles.com' : 'rpc.aboutcircles.com'}`} />
         </div>
         {isTestEnvConfigured() && (
           <div className="flex items-center">
