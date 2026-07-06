@@ -8,9 +8,11 @@
 // Configure with VITE_TEST_ENV_URL (defaults to staging). CORS defaults to "*" on the
 // test-env, but a locked-down deployment must allow this app's origin.
 
-export const TEST_ENV_URL = (
-  import.meta.env.VITE_TEST_ENV_URL || 'https://rpc.staging.aboutcircles.com/test-env'
-).replace(/\/+$/, '');
+// No default on purpose: time-travel is OFF unless VITE_TEST_ENV_URL is explicitly set.
+// This keeps the feature disabled on the public GitHub Pages build (which sets no env),
+// so anonymous visitors can't create test-env sessions and exhaust the global session cap.
+// Internal/local builds opt in via .env.local (see .env.example).
+export const TEST_ENV_URL = (import.meta.env.VITE_TEST_ENV_URL || '').replace(/\/+$/, '');
 
 export const isTestEnvConfigured = () => Boolean(TEST_ENV_URL);
 
@@ -72,24 +74,66 @@ export const getTestEnvSession = (blockNumber) => {
   return entry;
 };
 
+// A genuine EVM revert (vs an infra/transport error) carries revert bytes in `data`, a
+// "revert" message, or the standard revert code 3. Everything else — HTTP 5xx, timeouts,
+// -32603/-32000 internal errors, expired sessions, network failures — is infra and must
+// NOT be presented to the user as a contract revert.
+const isRevertError = (error) => {
+  const hasRevertData =
+    typeof error?.data === 'string' && error.data.startsWith('0x') && error.data.length > 2;
+  const msg = (error?.message || '').toLowerCase();
+  return hasRevertData || msg.includes('revert') || error?.code === 3;
+};
+
 /**
- * POST a single JSON-RPC call to a session's Anvil fork. Throws on a JSON-RPC error,
- * attaching `.data` (revert bytes, if any) and `.code` for the caller to decode.
+ * POST a single JSON-RPC call to a session's Anvil fork. Throws on any failure, tagging the
+ * error `.kind`: 'revert' for a genuine contract revert (carries `.data`/`.code`), else
+ * 'infra' (network / HTTP / non-JSON / timeout / missing result) so callers never mistake
+ * an infra failure for an on-chain revert.
  */
 export const anvilRpc = async (anvilUrl, method, params) => {
-  const res = await fetch(anvilUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const data = await res.json().catch(() => ({}));
+  let res;
+  try {
+    res = await fetch(anvilUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+  } catch (netErr) {
+    const e = new Error(`could not reach the fork: ${netErr?.message || netErr}`);
+    e.kind = 'infra';
+    throw e;
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const e = new Error(`fork proxy returned HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+    e.kind = 'infra';
+    throw e;
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    const e = new Error('fork returned a non-JSON response');
+    e.kind = 'infra';
+    throw e;
+  }
+
   if (data?.error) {
     const err = new Error(data.error.message || 'anvil JSON-RPC error');
     err.data = data.error.data;
     err.code = data.error.code;
+    err.kind = isRevertError(data.error) ? 'revert' : 'infra';
     throw err;
   }
-  return data?.result;
+  if (data.result === undefined) {
+    const e = new Error('fork returned no result');
+    e.kind = 'infra';
+    throw e;
+  }
+  return data.result;
 };
 
 // Known Circles/OZ error selectors → human labels, so a fork revert reads clearly.

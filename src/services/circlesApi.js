@@ -9,7 +9,7 @@ import {
 } from "@aboutcircles/sdk-pathfinder";
 import { encodeFunctionData, concatHex } from 'viem';
 import cacheService from './cacheService';
-import { getTestEnvSession, anvilRpc, decodeRevert } from './testEnv';
+import { getTestEnvSession, anvilRpc, decodeRevert, isTestEnvConfigured } from './testEnv';
 
 export const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || 'https://rpc.aboutcircles.com/';
 export const STAGING_ENDPOINT = import.meta.env.VITE_STAGING_ENDPOINT || 'https://rpc.staging.aboutcircles.com/';
@@ -123,7 +123,7 @@ export const findPath = async (formData, sdkRpc) => {
   // proxy that injects X-Max-Block-Number, so the path resolves against that past block.
   const blockNumber = parseBlockNumber(formData.BlockNumber);
   let rpc;
-  if (blockNumber) {
+  if (blockNumber && isTestEnvConfigured()) {
     const session = await getTestEnvSession(blockNumber);
     rpc = new CirclesRpc(session.rpcUrl);
   } else if (formData.UseStaging) {
@@ -225,7 +225,13 @@ export const executeFlowMatrixOnFork = async ({ blockNumber, source, hubAddress,
   try {
     await anvilRpc(session.anvilUrl, 'eth_call', [tx, 'latest']);
   } catch (err) {
-    return { success: false, revertReason: decodeRevert(err) };
+    // Only a genuine contract revert is a "would-fail-on-chain" signal. Infra failures
+    // (network, HTTP, timeout, expired session) are rethrown so the UI shows "couldn't
+    // run" rather than a misleading revert that looks like a pathfinder bug.
+    if (err?.kind === 'revert') {
+      return { success: false, revertReason: decodeRevert(err) };
+    }
+    throw err;
   }
 
   // Succeeded — best-effort gas estimate for display (never fail the result on this).

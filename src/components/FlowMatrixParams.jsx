@@ -524,7 +524,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
                   {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
                   {copied.calldata ? "Copied!" : "Calldata"}
                 </Button>
-                {blockNumber && (
+                {blockNumber && showProcessed && (
                   <Button
                     onClick={handleExecuteOnFork}
                     disabled={isForkRunning || !flowMatrix}
@@ -619,10 +619,17 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
             <div className="font-medium">Execute on fork (block {blockNumber})</div>
             {forkError && <div>Error: {forkError}</div>}
             {forkResult?.success && (
-              <div>✔ Would succeed on-chain{forkResult.gasUsed ? ` — gas ${forkResult.gasUsed}` : ''}.</div>
+              <div>✔ Would succeed on-chain{forkResult.gasUsed ? ` — est. gas ${forkResult.gasUsed}` : ''}.</div>
             )}
             {forkResult && !forkResult.success && (
-              <div>✖ Reverts: {forkResult.revertReason}</div>
+              <>
+                <div>✖ Reverts: {forkResult.revertReason}</div>
+                <div className="mt-1 text-xs text-red-700">
+                  Note: this runs the bare operateFlowMatrix. Paths that use wrapped balances
+                  (Include Wrapped Tokens) revert here without the unwrap steps — use “Simulate”
+                  for those, or turn off wrapped tokens to validate the direct transfer.
+                </div>
+              </>
             )}
           </div>
         )}

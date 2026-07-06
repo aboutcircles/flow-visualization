@@ -99,6 +99,7 @@ export const useFormData = () => {
         name === 'fromTokens' ? 'FromTokens' :
         name === 'toTokens' ? 'ToTokens' :
         name === 'maxTransfers' ? 'MaxTransfers' :
+        name === 'blockNumber' ? 'BlockNumber' :
         name;
 
       // Clear token filters when addresses change (stale filters cause empty results)
