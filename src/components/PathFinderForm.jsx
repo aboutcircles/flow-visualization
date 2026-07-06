@@ -10,6 +10,7 @@ import InfoTip from '@/components/ui/info-tip';
 import { parseAddressList } from '@/services/circlesApi';
 import { isTestEnvConfigured } from '@/services/testEnv';
 import * as SliderPrimitive from '@radix-ui/react-slider';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const BALANCES_GRID_COLUMNS = ['holder', 'token', 'amount', 'isWrapped', 'isStatic'];
 const TRUSTS_GRID_COLUMNS = ['truster', 'trustee'];
@@ -79,6 +80,9 @@ const PathFinderForm = ({
   const toTokensRef = useRef(null);
   const handleFindPathRef = useRef(null);
   const [isSimulationEditorOpen, setIsSimulationEditorOpen] = useState(false);
+  // Collapsed by default so the form is quiet on load (mirrors the Performance panel).
+  // Intentionally not persisted — a fresh load should always start collapsed.
+  const [isSimulationsExpanded, setIsSimulationsExpanded] = useState(false);
   const [simulationBalanceRows, setSimulationBalanceRows] = useState([]);
   const [simulationTrustRows, setSimulationTrustRows] = useState([]);
   const [simulationConsentedRows, setSimulationConsentedRows] = useState([]);
@@ -427,38 +431,56 @@ const PathFinderForm = ({
             />
           </div>
         )}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium mb-1">
-            Simulations
-            <InfoTip text="Open an editor with dedicated grids for simulated balances and simulated trusts." />
-          </label>
-          <div className="rounded-md border border-input p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-xs text-gray-500">
-                Balances: {parsedSimulatedBalances.length} · Trusts: {parsedSimulatedTrusts.length}
+        <div className="rounded-md border border-input">
+          <button
+            type="button"
+            onClick={() => setIsSimulationsExpanded((value) => !value)}
+            aria-expanded={isSimulationsExpanded}
+            className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+          >
+            <span className="flex items-center gap-2">
+              Simulations
+              {(parsedSimulatedBalances.length + parsedSimulatedTrusts.length) > 0 && (
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-normal text-blue-700">
+                  {parsedSimulatedBalances.length + parsedSimulatedTrusts.length} active
+                </span>
+              )}
+            </span>
+            {isSimulationsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {isSimulationsExpanded && (
+            <div className="space-y-4 border-t px-3 pb-3 pt-3">
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500">
+                  Overlay hypothetical balances and trusts to test what-if pathfinding scenarios.
+                </p>
+                <div className="rounded-md border border-input p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-gray-500">
+                      Balances: {parsedSimulatedBalances.length} · Trusts: {parsedSimulatedTrusts.length}
+                    </div>
+                    <Button type="button" onClick={openSimulationEditor}>Edit simulations</Button>
+                  </div>
+                </div>
+                {formErrors?.SimulatedBalances && <p className="text-xs text-red-600">{formErrors.SimulatedBalances}</p>}
+                {formErrors?.SimulatedTrusts && <p className="text-xs text-red-600">{formErrors.SimulatedTrusts}</p>}
               </div>
-              <Button type="button" onClick={openSimulationEditor}>Edit simulations</Button>
+              <div className="opacity-40 pointer-events-none" title="Not yet supported by SDK">
+                <label className="block text-sm font-medium mb-1">
+                  Simulated Consented Avatars
+                  <InfoTip text='Not yet supported — awaiting SDK update. Will accept comma/space separated avatar addresses.' />
+                </label>
+                <Input
+                  name="SimulatedConsentedAvatars"
+                  value={formData.SimulatedConsentedAvatars}
+                  onChange={handleInputChange}
+                  placeholder="0x...,0x..."
+                  disabled
+                />
+                {formErrors?.SimulatedConsentedAvatars && <p className="mt-1 text-xs text-red-600">{formErrors.SimulatedConsentedAvatars}</p>}
+              </div>
             </div>
-            <p className="text-xs text-gray-500">
-              Edit simulated balances and trusts for hypothetical pathfinding scenarios.
-            </p>
-          </div>
-          {formErrors?.SimulatedBalances && <p className="text-xs text-red-600">{formErrors.SimulatedBalances}</p>}
-          {formErrors?.SimulatedTrusts && <p className="text-xs text-red-600">{formErrors.SimulatedTrusts}</p>}
-        </div>
-        <div className="opacity-40 pointer-events-none" title="Not yet supported by SDK">
-          <label className="block text-sm font-medium mb-1">
-            Simulated Consented Avatars
-            <InfoTip text='Not yet supported — awaiting SDK update. Will accept comma/space separated avatar addresses.' />
-          </label>
-          <Input
-            name="SimulatedConsentedAvatars"
-            value={formData.SimulatedConsentedAvatars}
-            onChange={handleInputChange}
-            placeholder="0x...,0x..."
-            disabled
-          />
-          {formErrors?.SimulatedConsentedAvatars && <p className="mt-1 text-xs text-red-600">{formErrors.SimulatedConsentedAvatars}</p>}
+          )}
         </div>
 
         {(formErrors?.From || formErrors?.To || formErrors?.Amount) && (
