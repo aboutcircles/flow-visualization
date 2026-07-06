@@ -1,3 +1,5 @@
+import { decodeAbiParameters } from 'viem';
+
 // Thin client for the Circles test environment session API.
 //
 // A session pins a block: the test-env proxies inject `X-Max-Block-Number` server-side,
@@ -156,6 +158,15 @@ export const decodeRevert = (err) => {
     const selector = raw.slice(0, 10).toLowerCase();
     if (KNOWN_ERROR_SELECTORS[selector]) {
       return `${KNOWN_ERROR_SELECTORS[selector]} (${selector})`;
+    }
+    // Standard Error(string) — decode the human-readable reason (e.g. a Safe "GS0xx" code).
+    if (selector === '0x08c379a0') {
+      try {
+        const [message] = decodeAbiParameters([{ type: 'string' }], `0x${raw.slice(10)}`);
+        if (message) return `"${message}"`;
+      } catch {
+        // fall through to the raw selector
+      }
     }
     return `reverted (${selector})`;
   }
