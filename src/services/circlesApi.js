@@ -7,7 +7,7 @@ import {
   getWrappedTokensFromPath,
   replaceWrappedTokensWithAvatars,
 } from "@aboutcircles/sdk-pathfinder";
-import { encodeFunctionData, concatHex } from 'viem';
+import { encodeFunctionData, concatHex, decodeFunctionResult } from 'viem';
 import cacheService from './cacheService';
 import { getTestEnvSession, anvilRpc, decodeRevert, isTestEnvConfigured } from './testEnv';
 
@@ -207,27 +207,69 @@ export const findPath = async (formData, sdkRpc) => {
   }
 };
 
+const SAFE_GET_OWNERS_ABI = [{
+  type: 'function',
+  name: 'getOwners',
+  stateMutability: 'view',
+  inputs: [],
+  outputs: [{ name: '', type: 'address[]' }],
+}];
+
+// Read the Safe owners of `safe` from the fork so we can pick a signer for the Safe
+// execTransaction simulation without a connected wallet (eth_call needs no real signature).
+const readSafeOwnersOnFork = async (anvilUrl, safe) => {
+  const data = encodeFunctionData({ abi: SAFE_GET_OWNERS_ABI, functionName: 'getOwners' });
+  const resultHex = await anvilRpc(anvilUrl, 'eth_call', [{ to: safe, data }, 'latest']);
+  return decodeFunctionResult({ abi: SAFE_GET_OWNERS_ABI, functionName: 'getOwners', data: resultHex });
+};
+
 /**
- * Execute a pathfinder-computed operateFlowMatrix call on the session's Anvil fork of the
- * pinned block and report whether it reverts. Uses eth_call from the flow source (no
- * signature needed on a fork); the fork state matches the block the path was computed at,
- * so a revert means the pathfinder produced a path that would fail on-chain.
- * Returns { success, gasUsed?, revertReason? }.
+ * Execute a pathfinder-computed transfer on the session's Anvil fork of the pinned block and
+ * report whether it reverts. Builds the SAME full bundle as the "Simulate" button
+ * (self-approval → wrapper.unwrap() → operateFlowMatrix → re-wrap) via
+ * buildSafeFlowMatrixSimulationTx — so paths that rely on wrapped (ERC-20) balances work,
+ * not just bare ERC-1155 transfers. Wrapper/token data is resolved against the block-pinned
+ * session RPC so it matches the fork. eth_call from a Safe owner (no signature needed on a
+ * fork); a revert means the path would fail on-chain. Returns { success, gasUsed?, revertReason? }.
  */
-export const executeFlowMatrixOnFork = async ({ blockNumber, source, hubAddress, calldata }) => {
+export const executeFlowMatrixOnFork = async ({ blockNumber, pathData, source, receiver, hubAddress }) => {
   const block = parseBlockNumber(blockNumber);
   if (!block) throw new Error('A positive block number is required to execute on the fork.');
-  if (!source || !hubAddress || !calldata) throw new Error('Missing source, hub address, or calldata.');
+  if (!pathData || !source || !receiver || !hubAddress) {
+    throw new Error('Missing path, source, receiver, or hub address.');
+  }
 
   const session = await getTestEnvSession(block);
-  const tx = { from: source, to: hubAddress, data: calldata };
+
+  // Resolve a Safe owner to sign the execTransaction simulation. Circles avatars are Safes.
+  let signer;
+  try {
+    const owners = await readSafeOwnersOnFork(session.anvilUrl, source);
+    if (!owners || owners.length === 0) throw new Error('no owners');
+    signer = owners[0];
+  } catch (err) {
+    if (err?.kind === 'infra') throw err; // network/HTTP — surface as "couldn't run"
+    throw new Error(`Could not read Safe owners for ${source} — execute-on-fork requires a Gnosis Safe avatar.`);
+  }
+
+  // Build the full unwrap → operateFlowMatrix → re-wrap bundle (identical to the Simulate
+  // button), resolving wrapper balances/types against the block-pinned session RPC.
+  const simTx = await buildSafeFlowMatrixSimulationTx({
+    pathData,
+    sender: source,
+    receiver,
+    signer,
+    hubAddress,
+    rpcUrl: session.rpcUrl,
+  });
+
+  const tx = { from: simTx.gasFrom, to: simTx.safeAddress, data: simTx.safeCalldata };
 
   try {
     await anvilRpc(session.anvilUrl, 'eth_call', [tx, 'latest']);
   } catch (err) {
     // Only a genuine contract revert is a "would-fail-on-chain" signal. Infra failures
-    // (network, HTTP, timeout, expired session) are rethrown so the UI shows "couldn't
-    // run" rather than a misleading revert that looks like a pathfinder bug.
+    // (network, HTTP, timeout, expired session) are rethrown so the UI shows "couldn't run".
     if (err?.kind === 'revert') {
       return { success: false, revertReason: decodeRevert(err) };
     }
@@ -242,7 +284,7 @@ export const executeFlowMatrixOnFork = async ({ blockNumber, source, hubAddress,
   } catch {
     // gas is informational only
   }
-  return { success: true, gasUsed };
+  return { success: true, gasUsed, unwrapCalls: simTx.summary?.unwrapCalls ?? 0 };
 };
 
 export const processPath = async (rawPath, sourceAddress) => {

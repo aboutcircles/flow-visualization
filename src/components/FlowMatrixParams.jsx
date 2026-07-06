@@ -408,15 +408,11 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
     setForkError(null);
     setForkResult(null);
 
-    let calldata = null;
-    try {
-      calldata = getCalldata();
-    } catch (err) {
-      setForkError(err?.message || 'Could not build calldata');
-      return;
-    }
-    if (!calldata || !sender) {
-      setForkError('No calldata or source available.');
+    // Use the raw path (with wrapper addresses) — buildSafeFlowMatrixSimulationTx resolves
+    // wrappers and injects the unwrap/re-wrap legs itself, same as the Simulate button.
+    const forkPathData = rawPathData || pathData;
+    if (!forkPathData || !sender || !receiver) {
+      setForkError('No path, source, or sink available.');
       return;
     }
 
@@ -424,9 +420,10 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
     try {
       const result = await executeFlowMatrixOnFork({
         blockNumber,
+        pathData: forkPathData,
         source: sender,
+        receiver,
         hubAddress: HUB_ADDRESS,
-        calldata,
       });
       setForkResult(result);
     } catch (err) {
@@ -524,7 +521,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
                   {copied.calldata ? <Check size={16} /> : <Copy size={16} />}
                   {copied.calldata ? "Copied!" : "Calldata"}
                 </Button>
-                {blockNumber && showProcessed && (
+                {blockNumber && (
                   <Button
                     onClick={handleExecuteOnFork}
                     disabled={isForkRunning || !flowMatrix}
@@ -622,14 +619,7 @@ const FlowMatrixParams = ({ pathData, rawPathData, sender, receiver, showProcess
               <div>✔ Would succeed on-chain{forkResult.gasUsed ? ` — est. gas ${forkResult.gasUsed}` : ''}.</div>
             )}
             {forkResult && !forkResult.success && (
-              <>
-                <div>✖ Reverts: {forkResult.revertReason}</div>
-                <div className="mt-1 text-xs text-red-700">
-                  Note: this runs the bare operateFlowMatrix. Paths that use wrapped balances
-                  (Include Wrapped Tokens) revert here without the unwrap steps — use “Simulate”
-                  for those, or turn off wrapped tokens to validate the direct transfer.
-                </div>
-              </>
+              <div>✖ Reverts: {forkResult.revertReason}</div>
             )}
           </div>
         )}
