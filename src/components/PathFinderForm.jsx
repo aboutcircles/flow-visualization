@@ -400,6 +400,19 @@ const PathFinderForm = ({
             type="number"
           />
         </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            Block Number (time-travel)
+            <InfoTip text="Pin the pathfinder and graph to a past block via a test-env session. Leave empty for latest. Requires VITE_TEST_ENV_URL (defaults to the staging test environment)." />
+          </label>
+          <Input
+            name="blockNumber"
+            value={formData.BlockNumber}
+            onChange={handleInputChange}
+            placeholder="latest"
+            type="number"
+          />
+        </div>
         <div className="space-y-2">
           <label className="block text-sm font-medium mb-1">
             Simulations
@@ -632,6 +645,7 @@ PathFinderForm.propTypes = {
     WithWrap: PropTypes.bool.isRequired,
     UseStaging: PropTypes.bool.isRequired,
     MaxTransfers: PropTypes.string,
+    BlockNumber: PropTypes.string,
     IsFromTokensExcluded: PropTypes.bool.isRequired,
     IsToTokensExcluded: PropTypes.bool.isRequired,
     QuantizedMode: PropTypes.bool.isRequired,

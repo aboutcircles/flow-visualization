@@ -42,6 +42,7 @@ const DEFAULTS = {
   SimulatedBalances: '[]',
   SimulatedTrusts: '[]',
   SimulatedConsentedAvatars: '',
+  BlockNumber: '',
 };
 
 const isAddress = (value) => typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value.trim());
