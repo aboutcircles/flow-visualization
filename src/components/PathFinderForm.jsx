@@ -59,6 +59,7 @@ const PathFinderForm = ({
   handleTokensChange,
   handleWithWrapToggle,
   handleStagingToggle,
+  handleTestEnvModeToggle,
   handleQuantizedModeToggle,
   handleDebugIntermediateToggle,
   handleFromTokensExclusionToggle,
@@ -375,6 +376,16 @@ const PathFinderForm = ({
           />
           <InfoTip text={`Prod: rpc.aboutcircles.com\nStaging: rpc.staging.aboutcircles.com\n\nCurrently using: ${formData.UseStaging ? 'rpc.staging.aboutcircles.com' : 'rpc.aboutcircles.com'}`} />
         </div>
+        {isTestEnvConfigured() && (
+          <div className="flex items-center">
+            <ToggleSwitch
+              isEnabled={formData.TestEnvMode}
+              onToggle={handleTestEnvModeToggle}
+              label="Test environment (time-travel)"
+            />
+            <InfoTip text="Route pathfinding and fork execution through the Circles test environment: pin to a past block and run the resulting transfer on an Anvil fork. Reveals the Block Number field and the Execute-on-fork button." />
+          </div>
+        )}
         <div className="flex items-center opacity-40 pointer-events-none" title="Not yet supported by SDK">
           <ToggleSwitch
             isEnabled={formData.QuantizedMode}
@@ -401,7 +412,7 @@ const PathFinderForm = ({
             type="number"
           />
         </div>
-        {isTestEnvConfigured() && (
+        {isTestEnvConfigured() && formData.TestEnvMode && (
           <div>
             <label className="block text-sm font-medium mb-1">
               Block Number (time-travel)
@@ -649,6 +660,7 @@ PathFinderForm.propTypes = {
     UseStaging: PropTypes.bool.isRequired,
     MaxTransfers: PropTypes.string,
     BlockNumber: PropTypes.string,
+    TestEnvMode: PropTypes.bool,
     IsFromTokensExcluded: PropTypes.bool.isRequired,
     IsToTokensExcluded: PropTypes.bool.isRequired,
     QuantizedMode: PropTypes.bool.isRequired,
@@ -663,6 +675,7 @@ PathFinderForm.propTypes = {
   handleTokensChange: PropTypes.func.isRequired,
   handleWithWrapToggle: PropTypes.func.isRequired,
   handleStagingToggle: PropTypes.func.isRequired,
+  handleTestEnvModeToggle: PropTypes.func,
   handleQuantizedModeToggle: PropTypes.func.isRequired,
   handleDebugIntermediateToggle: PropTypes.func.isRequired,
   handleFromTokensExclusionToggle: PropTypes.func.isRequired,

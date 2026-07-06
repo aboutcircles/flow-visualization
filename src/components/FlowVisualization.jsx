@@ -51,6 +51,7 @@ const FlowVisualization = () => {
     handleTokensChange, 
     handleWithWrapToggle,
     handleStagingToggle,
+    handleTestEnvModeToggle,
     handleQuantizedModeToggle,
     handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,
@@ -836,6 +837,7 @@ const FlowVisualization = () => {
             handleTokensChange={handleTokensChange}
             handleWithWrapToggle={handleWithWrapToggle}
             handleStagingToggle={handleStagingToggle}
+            handleTestEnvModeToggle={handleTestEnvModeToggle}
             handleQuantizedModeToggle={handleQuantizedModeToggle}
             handleDebugIntermediateToggle={handleDebugIntermediateToggle}
             handleFromTokensExclusionToggle={handleFromTokensExclusionToggle}

@@ -42,6 +42,7 @@ const DEFAULTS = {
   SimulatedBalances: '[]',
   SimulatedTrusts: '[]',
   SimulatedConsentedAvatars: '',
+  TestEnvMode: false,
   BlockNumber: '',
 };
 
@@ -208,6 +209,15 @@ export const useFormData = () => {
     }));
   };
 
+  const handleTestEnvModeToggle = () => {
+    setFormData(prev => ({
+      ...prev,
+      TestEnvMode: !prev.TestEnvMode,
+      // Leaving test-env mode returns pathfinding to head — clear the pinned block.
+      BlockNumber: prev.TestEnvMode ? '' : prev.BlockNumber,
+    }));
+  };
+
   const handleQuantizedModeToggle = () => {
     setFormData(prev => ({
       ...prev,
@@ -367,6 +377,7 @@ export const useFormData = () => {
     handleTokensChange,
     handleWithWrapToggle,
     handleStagingToggle,
+    handleTestEnvModeToggle,
     handleQuantizedModeToggle,
     handleDebugIntermediateToggle,
     handleFromTokensExclusionToggle,
